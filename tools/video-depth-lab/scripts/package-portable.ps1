@@ -1,7 +1,7 @@
 param([string]$Destination = '')
 $ErrorActionPreference = 'Stop'
 $lab = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-if (!$Destination) { $Destination = Join-Path $lab '../../dist/video-depth-batch/SHIYIN-Depth-Batch-0.3.1' }
+if (!$Destination) { $Destination = Join-Path $lab '../../dist/video-depth-batch/SHIYIN-Depth-Batch-0.3.2' }
 $Destination = [IO.Path]::GetFullPath($Destination)
 New-Item -ItemType Directory -Force $Destination | Out-Null
 Copy-Item -LiteralPath (Join-Path $lab 'src-tauri/target/release/SHIYIN-Video-Depth-Lab.exe') -Destination (Join-Path $Destination 'SHIYIN-Depth-Batch.exe') -Force

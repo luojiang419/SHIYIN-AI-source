@@ -17,10 +17,10 @@ import numpy as np
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from worker.depth_controls import DepthControls, apply_depth_controls, normalize_relative_depth
-    from worker.models import MODEL_PROFILES, get_profile, infer_depths, model_status
+    from worker.models import MODEL_PROFILES, get_profile, infer_depths, model_status, unload_cached_models
 else:
     from .depth_controls import DepthControls, apply_depth_controls, normalize_relative_depth
-    from .models import MODEL_PROFILES, get_profile, infer_depths, model_status
+    from .models import MODEL_PROFILES, get_profile, infer_depths, model_status, unload_cached_models
 
 
 LAB_ROOT = Path(__file__).resolve().parents[1]
@@ -282,6 +282,47 @@ def run_postprocess(args: argparse.Namespace) -> dict[str, Any]:
     return {"outputVideoPath": str(output), "parameters": controls.as_camel_dict(), "fps": fps}
 
 
+def run_batch(args: argparse.Namespace) -> dict[str, Any]:
+    """Run manifest entries serially so CUDA memory is never shared by jobs."""
+    manifest_path = Path(args.manifest).resolve()
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not items:
+        raise ValueError("批处理清单必须包含至少一个 items 项")
+    if len(items) > 500:
+        raise ValueError("一次批处理最多支持 500 个视频")
+    root = Path(args.output_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, Any]] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"第 {index} 个批处理项必须是对象")
+        input_path = Path(str(item.get("input") or "")).resolve()
+        if not input_path.is_file():
+            raise FileNotFoundError(f"第 {index} 个输入视频不存在：{input_path}")
+        model = str(item.get("model") or args.model)
+        profile = get_profile(model)
+        output_dir = root / f"{index:03d}-{input_path.stem}-{model.replace('_', '-')}"
+        progress(round((index - 1) / len(items) * 100), f"批处理 {index}/{len(items)}：{input_path.name}")
+        request = argparse.Namespace(
+            input=str(input_path), output_dir=str(output_dir), model=model,
+            input_size=int(item.get("inputSize") or profile.default_input_size),
+            target_fps=float(item.get("targetFps", -1)), max_frames=int(item.get("maxFrames", -1)),
+            max_resolution=int(item.get("maxResolution", -1)),
+            params_json=json.dumps(item.get("parameters") or {}, ensure_ascii=False),
+        )
+        try:
+            results.append({"status": "done", "result": run_infer(request)})
+        except BaseException as error:
+            results.append({"status": "failed", "input": str(input_path), "error": str(error)})
+        finally:
+            unload_cached_models()
+    summary = {"schema": "shiyin.video-depth-lab.batch/v1", "manifest": str(manifest_path), "outputRoot": str(root), "items": results}
+    (root / "batch-metadata.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    progress(100, "批处理已完成")
+    return summary
+
+
 def run_status() -> dict[str, Any]:
     import torch
 
@@ -356,6 +397,10 @@ def build_parser() -> argparse.ArgumentParser:
     post.add_argument("--raw", required=True)
     post.add_argument("--output", required=True)
     post.add_argument("--params-json", default="{}")
+    batch = subparsers.add_parser("batch")
+    batch.add_argument("--manifest", required=True)
+    batch.add_argument("--output-root", required=True)
+    batch.add_argument("--model", choices=sorted(MODEL_PROFILES), default="vda_small_fp16_relative")
     serve = subparsers.add_parser("serve")
     # Keep infer-shaped arguments for older launch wrappers that inspect the command.
     serve.add_argument("--model")
@@ -381,8 +426,10 @@ def main() -> int:
             result = {"path": str(input_path), "name": input_path.name, **probe_video(input_path)}
         elif args.command == "infer":
             result = run_infer(args)
-        else:
+        elif args.command == "postprocess":
             result = run_postprocess(args)
+        else:
+            result = run_batch(args)
         emit("result", result=result)
         return 0
     except BaseException as error:

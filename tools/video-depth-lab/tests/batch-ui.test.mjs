@@ -41,9 +41,35 @@ test('批量界面串行调用真实命令、保留参数并隔离失败任务',
     assert.equal(requests[0].args.request.extractionMode,'professional');
     assert.equal(calls.find(c => c.name === 'apply_parameters').args.request.parameters.midtone,12);
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight),true);
+    assert.equal(await page.locator('.summary').count(),0);
+    assert.equal(await page.locator('.compact-model-status [data-action=start]').count(),1);
+    assert.equal(await page.locator('body > .actions, main > .actions').count(),0);
     await page.reload();
     assert.equal(await page.locator('.job.done').count(),1);
     assert.deepEqual(errors,[]);
+  } finally { await browser.close(); }
+});
+
+test('拖拽视频到任务区域会自动导入并清除拖拽提示', async () => {
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      window.calls = []; window.listeners = {};
+      window.__TAURI__ = {event:{listen:async (name, callback) => { window.listeners[name] = callback; }},core:{convertFileSrc:p => p,invoke:async (name,args) => {
+        window.calls.push({name,args});
+        if(name === 'get_runtime_status') return {runtimeReady:true,device:'cpu',models:[]};
+        if(name === 'load_input_video') return {name:args.path.split('/').pop(),path:args.path,width:1920,height:1080,fps:30};
+      }}};
+    });
+    await page.goto(pathToFileURL(fileURLToPath(new URL('../batch-prototype/index.html',import.meta.url))).href);
+    await page.waitForFunction(() => Boolean(window.listeners['tauri://drag-drop']));
+    await page.evaluate(() => window.listeners['tauri://drag-enter']({payload:{}}));
+    assert.equal(await page.locator('.queue-panel.drag-active').count(),1);
+    await page.evaluate(() => window.listeners['tauri://drag-drop']({payload:{paths:['C:/video/a.mp4','C:/video/b.mov']}}));
+    await page.waitForFunction(() => document.querySelectorAll('.job').length === 2);
+    assert.equal(await page.locator('.queue-panel.drag-active').count(),0);
+    assert.deepEqual(await page.evaluate(() => window.calls.filter(c => c.name === 'load_input_video').map(c => c.args.path)),['C:/video/a.mp4','C:/video/b.mov']);
   } finally { await browser.close(); }
 });
 

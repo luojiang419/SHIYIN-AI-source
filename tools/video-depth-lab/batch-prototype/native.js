@@ -27,13 +27,8 @@ preview.muted = true; preview.loop = true; preview.playsInline = true; preview.c
 $('[data-depth-scene]').replaceWith(preview);
 let previewPath = '';
 function render() {
-  const done = queue.filter(j => j.state === 'done').length;
   const active = queue.find(j => j.state === 'active');
   $('[data-queue]').innerHTML = queue.map((j, i) => `<article class="job ${j.state} ${i === selected ? 'selected' : ''}" data-select="${i}"><span class="thumb">${j.state === 'done' ? '✓' : '▶'}</span><div><div class="job-name">${escapeHtml(j.name)}</div><div class="job-meta" title="${escapeHtml(j.error || j.path)}">${escapeHtml(j.error || j.meta || '保留原视频规格')}</div>${j.state === 'active' ? `<div class="job-progress"><i style="width:${j.progress || 0}%"></i></div>` : ''}</div><div class="job-status">${({waiting:'等待', active:`${j.progress || 0}%`, done:'已完成', failed:'失败 · 点开始重试'})[j.state]}<button class="job-remove" data-remove="${i}" ${j.state === 'active' ? 'disabled' : ''}>×</button></div></article>`).join('');
-  $('[data-total]').textContent = `${queue.length} 个视频`;
-  $('[data-summary-progress]').textContent = `${done} / ${queue.length}`;
-  $('[data-summary-bar]').style.width = `${queue.length ? (done + (active?.progress || 0)/100)/queue.length*100 : 0}%`;
-  $('[data-remaining]').textContent = preparing ? '准备组件中' : active ? '处理中' : paused ? '已暂停' : '—';
   $('[data-queue-count]').textContent = `${queue.length} 个任务 · ${queue.filter(j => j.state === 'failed').length} 个失败`;
   $('[data-path]').textContent = outputRoot || '请选择输出目录';
   $('[data-note] b').textContent = preparing ? '首次准备运行时与模型' : active ? `正在处理 ${active.name}` : paused ? '队列已暂停' : '准备就绪';
@@ -62,6 +57,18 @@ function renderParameters() {
 function select(index) { selected = index; parameters = {...defaults, ...queue[index]?.parameters}; renderParameters(); render(); }
 function saveParameters() { if (queue[selected]) queue[selected].parameters = {...parameters}; persist(); renderParameters(); }
 function add(files) { for (const f of files) if (!queue.some(j => j.path === f.path)) queue.push({...f, state:'waiting', progress:0, parameters:{...defaults}, meta:f.width ? `${f.width}×${f.height} · ${Number(f.fps).toFixed(2)} FPS` : ''}); persist(); render(); }
+async function addDroppedPaths(paths) {
+  const uniquePaths = [...new Set((paths || []).filter(Boolean))];
+  const imported = [];
+  const failures = [];
+  for (const path of uniquePaths) {
+    try { imported.push(await invoke('load_input_video', {path})); }
+    catch (error) { failures.push(`${path}：${String(error)}`); }
+  }
+  if (imported.length) { add(imported); toast(`已拖入 ${imported.length} 个视频任务`); }
+  if (failures.length) toast(`有 ${failures.length} 个文件无法导入：${failures[0]}`);
+}
+function setDragActive(active) { $('.queue-panel').classList.toggle('drag-active', Boolean(active)); }
 async function status() {
   const s = await invoke('get_runtime_status');
   $('.health strong').textContent = s.runtimeReady ? '本地运行时已就绪' : '首次使用将下载运行时';
@@ -127,8 +134,13 @@ $('[data-action="close-compare"]').onclick = () => dialog.close(); dialog.onclos
 $('[data-compare-wipe]').oninput = wipe;
 async function init() {
   await api.event.listen('depth-progress', ({payload}) => { const job = queue.find(j => j.state === 'active'); if (job) { job.progress = payload.percent; job.message = payload.message; render(); } else if (preparing) { preparationMessage = payload.message; render(); } });
-  await api.event.listen('tauri://drag-drop', async ({payload}) => { for (const path of payload.paths || []) { try { add([await invoke('load_input_video', {path})]); } catch(e) { fail(e); } } });
+  await api.event.listen('tauri://drag-enter', () => setDragActive(true));
+  await api.event.listen('tauri://drag-leave', () => setDragActive(false));
+  await api.event.listen('tauri://drag-drop', ({payload}) => { setDragActive(false); addDroppedPaths(payload?.paths).catch(fail); });
   await status();
+}
+for (const eventName of ['dragenter','dragover','dragleave','drop']) {
+  document.addEventListener(eventName, event => { event.preventDefault(); if (eventName === 'dragenter' || eventName === 'dragover') setDragActive(true); if (eventName === 'dragleave' || eventName === 'drop') setDragActive(false); });
 }
 $('.queue-foot span:last-child').textContent = '失败任务点击开始重试 · 关闭后保留队列';
 setInterval(() => { if (preparing) render(); }, 1000);

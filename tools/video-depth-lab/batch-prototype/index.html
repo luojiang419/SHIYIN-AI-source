@@ -14,20 +14,13 @@
         <div class="health"><span class="health-dot"></span><div><strong>本地运行时已就绪</strong><small>CUDA 12.8 · FFmpeg · 单任务串行</small></div><button class="icon-button" title="打开设置" aria-label="打开设置">&#9881;</button></div>
       </header>
 
-      <section class="summary">
-        <div><span>本次队列</span><strong data-total>3 个视频</strong></div>
-        <div><span>处理进度</span><strong data-summary-progress>1 / 3</strong></div>
-        <div><span>预计剩余</span><strong data-remaining>约 18 分钟</strong></div>
-        <div class="summary-progress"><i data-summary-bar></i></div>
-      </section>
-
       <section class="layout">
         <section class="queue-panel panel">
           <header class="panel-head"><div><span class="eyebrow">QUEUE</span><h2>待处理视频</h2></div><button class="text-button" data-action="clear">清空队列</button></header>
           <section class="left-configuration" aria-label="批量提取设置">
             <div class="compact-setting"><span class="eyebrow">MODEL</span><label>深度模型<select data-field="model"><option>Video Depth Anything Base</option><option>Video Depth Anything Small</option></select></label><div class="compact-grid"><label>输入尺寸<select data-field="size"><option>322 · 推荐</option><option>518 · 高质量</option></select></label><label>提取模式<select data-field="mode"><option value="person">人物模式 · 自动分割</option><option value="professional" selected>专业模式 · 全部深度</option></select></label></div><small data-mode-note>专业模式会提取整幅画面的全部深度</small></div>
             <div class="compact-setting"><span class="eyebrow">DESTINATION</span><label>输出位置<button class="path" data-action="path" type="button"><span data-path>E:\输出\深度视频</span><b>浏览</b></button></label><small>保留原视频规格 · 每个视频独立输出</small></div>
-            <div class="compact-model-status"><span class="model-icon">↓</span><div><span>模型按需下载</span><strong>首次开始时从魔塔下载</strong><small>约 458 MB · SHA-256 校验</small></div><button class="link-button" type="button" data-action="model">模型状态</button></div>
+            <div class="compact-model-status"><span class="model-icon">↓</span><div class="model-copy"><span>模型按需下载</span><strong>首次开始时从魔塔下载</strong><small>约 458 MB · SHA-256 校验</small></div><button class="link-button" type="button" data-action="model">模型状态</button><div class="compact-action-note" data-note><b>准备就绪</b><span>按顺序提取，保留原始 FPS、全部帧与原始分辨率</span></div><div class="action-buttons"><button class="button muted" data-action="pause" type="button">暂停队列</button><button class="button primary" data-action="start" type="button">开始批量提取</button></div></div>
           </section>
           <button class="dropzone" data-action="add" type="button"><b>导入视频</b><span>点击选择或拖入多个 MP4、MOV、MKV、AVI、WEBM 文件</span><em>支持批量添加，队列会按顺序逐一处理</em></button>
           <input data-input type="file" accept="video/*,.mkv,.avi" multiple hidden>
@@ -71,7 +64,6 @@
         </aside>
       </section>
 
-      <footer class="actions"><div class="action-note" data-note><b>正在处理 1 / 3</b><span>fashion_walk_01.mp4 · 正在进行深度推理</span></div><div class="action-buttons"><button class="button muted" data-action="pause" type="button">暂停队列</button><button class="button primary" data-action="start" type="button">开始批量提取</button></div></footer>
     </main>
     <div class="toast" data-toast hidden></div>
     <dialog class="compare-dialog" data-compare-dialog><header><div><span class="eyebrow">COMPARE</span><h2>划像对比播放</h2></div><button class="icon-button" data-action="close-compare" type="button" title="关闭">×</button></header><div class="compare-stage" data-compare-stage><div class="compare-depth"><span class="depth-scene" data-compare-depth><i></i><i></i><i></i><b></b></span></div><div class="compare-source" data-compare-source><span>源视频</span></div><i class="compare-divider" data-compare-divider>↔</i><input data-compare-wipe type="range" min="0" max="100" value="50" aria-label="划像位置"></div><footer><span data-compare-name>fashion_walk_01.mp4</span><span>拖动中间手柄对比源视频与深度视频</span></footer></dialog>

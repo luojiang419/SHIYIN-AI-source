@@ -3281,7 +3281,7 @@ dependencies = [
 
 [[package]]
 name = "shiyin-video-depth-lab"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "encoding_rs",
  "rfd",

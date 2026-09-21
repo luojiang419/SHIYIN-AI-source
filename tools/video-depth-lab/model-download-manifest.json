@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "component": "video-depth",
+  "version": "2.0.0",
+  "enabled": true,
+  "release_status": "released",
+  "message": "深度视频模型将按本机配置自动选择并下载",
+  "license_notice": "轻量档 Video Depth Anything Small 为 Apache-2.0；高质量档 Video Depth Anything Base 为 CC-BY-NC-4.0，仅限非商业用途。",
+  "packages": [
+    {
+      "id": "vda-small-model",
+      "size": 116440756,
+      "sha256": "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609",
+      "target_path": "models/video-depth-anything-small/video_depth_anything_vits.pth",
+      "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-depth-lite-models/resolve/a1a14f2b20152dd7f2978d32bea5cad74a5a6e02/video-depth/video_depth_anything_vits.pth",
+      "mirror_url": "",
+      "official_url": "https://modelscope.cn/models/depth-anything/Video-Depth-Anything-Small/resolve/8dd3558f4d407363cc1a113b81e89f16a0d51e5c/video_depth_anything_vits.pth"
+    },
+    {
+      "id": "vda-base-model",
+      "size": 458247082,
+      "sha256": "775e578e8f9431ec0496514aa466bd0a1f67c28d0f518267809f35a43c04329b",
+      "target_path": "models/video-depth-anything-base/video_depth_anything_vitb.pth",
+      "domestic_url": "https://modelscope.cn/models/depth-anything/Video-Depth-Anything-Base/resolve/master/video_depth_anything_vitb.pth",
+      "mirror_url": "https://hf-mirror.com/depth-anything/Video-Depth-Anything-Base/resolve/main/video_depth_anything_vitb.pth",
+      "official_url": "https://huggingface.co/depth-anything/Video-Depth-Anything-Base/resolve/main/video_depth_anything_vitb.pth"
+    }
+  ],
+  "variants": [
+    {
+      "id": "quality",
+      "priority": 100,
+      "constraints": {"accelerator": "cuda", "min_gpu_memory_bytes": 8589934592},
+      "command": ["models/video-depth-anything-base/video_depth_anything_vitb.pth"],
+      "required_paths": ["models/video-depth-anything-base/video_depth_anything_vitb.pth"],
+      "required_free_bytes": 1100000000,
+      "packages": ["vda-base-model"]
+    },
+    {
+      "id": "lite",
+      "priority": 10,
+      "constraints": {"accelerator": "cpu"},
+      "command": ["models/video-depth-anything-small/video_depth_anything_vits.pth"],
+      "required_paths": ["models/video-depth-anything-small/video_depth_anything_vits.pth"],
+      "required_free_bytes": 350000000,
+      "packages": ["vda-small-model"]
+    }
+  ]
+}

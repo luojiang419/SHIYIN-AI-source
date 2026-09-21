@@ -1,16 +1,16 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "SHIYIN 视频深度验证台",
+  "productName": "SHIYIN 批量深度视频提取器",
   "version": "0.2.0",
   "identifier": "com.shiyin.video.depth.lab",
   "build": {
-    "frontendDist": "../frontend"
+    "frontendDist": "../batch-prototype"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "SHIYIN 视频深度验证台",
+        "title": "SHIYIN 批量深度视频提取器",
         "width": 1520,
         "height": 940,
         "minWidth": 1120,

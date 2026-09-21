@@ -39,7 +39,8 @@ class DepthControlTests(unittest.TestCase):
         self.assertEqual(vda.encoder, "vitb")
         self.assertEqual(vda.depth_type, "Relative Depth")
         self.assertIn("FP16", vda.precision)
-        self.assertEqual(set(MODEL_PROFILES), {"gemdepth_vda_8f", "vda_base_fp16_relative"})
+        self.assertEqual(set(MODEL_PROFILES), {"gemdepth_vda_8f", "vda_base_fp16_relative", "vda_small_fp16_relative"})
+        self.assertEqual(get_profile("vda_small_fp16_relative").encoder, "vits")
 
     def test_original_and_1080p_output_sizing(self):
         self.assertEqual(_scaled_size(1920, 1080, -1), (1920, 1080))

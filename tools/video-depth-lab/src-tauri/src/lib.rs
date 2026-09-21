@@ -68,6 +68,9 @@ fn locate_lab_root() -> Result<PathBuf, String> {
             candidates.push(PathBuf::from(value.trim()));
         }
     }
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() { candidates.push(parent.to_path_buf()); }
+    }
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".."));
     if let Ok(current) = std::env::current_dir() {
         candidates.extend(current.ancestors().map(Path::to_path_buf));
@@ -88,6 +91,7 @@ fn locate_lab_root() -> Result<PathBuf, String> {
 fn python_executable(root: &Path) -> Result<PathBuf, String> {
     let candidates = if cfg!(target_os = "windows") {
         vec![
+            root.join("runtime/video-depth-worker/video-depth-worker.exe"),
             root.join("runtime/venv/Scripts/python.exe"),
             root.join("runtime/venv/python.exe"),
         ]
@@ -132,6 +136,9 @@ fn validate_video(path: &Path) -> Result<VideoPayload, String> {
 
 fn load_video_payload(root: &Path, path: &Path) -> Result<Value, String> {
     let payload = validate_video(path)?;
+    if python_executable(root).is_err() {
+        return serde_json::to_value(payload).map_err(|error| error.to_string());
+    }
     let probe = run_worker(
         None,
         root,
@@ -169,8 +176,10 @@ fn run_worker(
 ) -> Result<Value, String> {
     let python = python_executable(root)?;
     let mut command = hidden_command(&python);
+    if python.file_name().and_then(|s| s.to_str()) != Some("video-depth-worker.exe") {
+        command.arg(root.join("worker/main.py"));
+    }
     command
-        .arg(root.join("worker/main.py"))
         .args(args)
         .current_dir(root)
         .stdin(Stdio::null())
@@ -178,6 +187,9 @@ fn run_worker(
         .stderr(Stdio::piped())
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
+        .env("SHIYIN_VIDEO_DEPTH_SOURCE_ROOT", root.join("runtime/sources"))
+        .env("SHIYIN_VIDEO_DEPTH_MODEL_ROOT", root.join("runtime/models"))
+        .env("PATH", format!("{};{}", root.join("runtime/bin").display(), std::env::var("PATH").unwrap_or_default()))
         .env_remove("HTTP_PROXY")
         .env_remove("HTTPS_PROXY")
         .env_remove("ALL_PROXY");
@@ -204,7 +216,11 @@ fn run_worker(
     });
     let mut result = None;
     let mut worker_error = None;
-    for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+    for bytes in BufReader::new(stdout).split(b'\n').map_while(Result::ok) {
+        let line = match std::str::from_utf8(&bytes) {
+            Ok(value) => value.to_string(),
+            Err(_) => encoding_rs::GBK.decode(&bytes).0.into_owned(),
+        };
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -290,11 +306,41 @@ fn run_id(model: &str) -> String {
 #[tauri::command]
 async fn get_runtime_status(state: State<'_, LabState>) -> Result<Value, String> {
     let snapshot = state.inner().clone();
+    if python_executable(&snapshot.root).is_err() {
+        return Ok(json!({"runtimeReady": false, "models": []}));
+    }
     tauri::async_runtime::spawn_blocking(move || {
         run_worker(None, &snapshot.root, &["status".to_string()], None)
     })
     .await
     .map_err(|error| format!("状态检查后台任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn ensure_components(app: AppHandle, state: State<'_, LabState>, model: String) -> Result<(), String> {
+    if !matches!(model.as_str(), "vda_base_fp16_relative" | "vda_small_fp16_relative") {
+        return Err("不支持的模型".into());
+    }
+    let snapshot = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = snapshot.operation_lock.lock().map_err(|_| "组件锁已损坏")?;
+        let mut command = hidden_command(Path::new("powershell.exe"));
+        command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(snapshot.root.join("scripts/prepare-components.ps1"))
+            .arg("-Root").arg(&snapshot.root).arg("-Model").arg(model)
+            .stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        *snapshot.active_pid.lock().map_err(|_| "进程锁已损坏")? = Some(child.id());
+        let stderr = child.stderr.take().ok_or("无法读取安装日志")?;
+        let reader = thread::spawn(move || { let mut s = String::new(); let _ = BufReader::new(stderr).read_to_string(&mut s); s });
+        for line in BufReader::new(child.stdout.take().ok_or("无法读取下载进度")?).lines().map_while(Result::ok) {
+            let _ = app.emit("depth-progress", json!({"percent": 0, "message": line}));
+        }
+        let status = child.wait().map_err(|e| e.to_string())?;
+        *snapshot.active_pid.lock().map_err(|_| "进程锁已损坏")? = None;
+        let detail = reader.join().unwrap_or_default();
+        if status.success() { Ok(()) } else { Err(format!("组件安装失败：{detail}")) }
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -307,6 +353,18 @@ fn choose_input_video(state: State<'_, LabState>) -> Result<Option<Value>, Strin
         return Ok(None);
     };
     load_video_payload(&state.root, &path).map(Some)
+}
+
+#[tauri::command]
+fn choose_input_videos(state: State<'_, LabState>) -> Result<Vec<Value>, String> {
+    let Some(paths) = FileDialog::new()
+        .set_title("选择待批量提取的视频")
+        .add_filter("视频", &["mp4", "mov", "mkv", "avi", "webm", "m4v"])
+        .pick_files()
+    else {
+        return Ok(Vec::new());
+    };
+    paths.iter().map(|path| load_video_payload(&state.root, path)).collect()
 }
 
 #[tauri::command]
@@ -525,6 +583,19 @@ fn cancel_inference(state: State<'_, LabState>) -> Result<bool, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Some(state) = window.app_handle().try_state::<LabState>() {
+                    if let Ok(mut slot) = state.active_pid.lock() {
+                        if let Some(pid) = slot.take() {
+                            #[cfg(target_os = "windows")]
+                            let _ = hidden_command(Path::new("taskkill.exe"))
+                                .args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+                        }
+                    }
+                }
+            }
+        })
         .setup(|app| {
             let root = locate_lab_root().map_err(std::io::Error::other)?;
             app.manage(LabState {
@@ -536,7 +607,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
+            ensure_components,
             choose_input_video,
+            choose_input_videos,
             load_input_video,
             choose_output_directory,
             run_inference,

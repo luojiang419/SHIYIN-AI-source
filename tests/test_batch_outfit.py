@@ -119,7 +119,11 @@ def test_batch_outfit_supports_multi_garment_stack_and_independent_grid_ratio():
     assert 'id="batchOutfitGridRatioField"' in ECOMMERCE_HTML
     assert 'id="batchOutfitGridRatio"' in ECOMMERCE_HTML
     assert "const TARGET_IMAGE_MAX = 20" in BATCH_JS
-    assert "group.inputs.target_image = [...currentTargets, ...images]" in BATCH_JS
+    assert "group.inputs.target_image = [...currentTargets, ...pendingImages]" in BATCH_JS
+    assert "const results = await Promise.allSettled(accepted.map(uploadFile));" in BATCH_JS
+    assert "preview_url:URL.createObjectURL(file)" in BATCH_JS
+    assert "inputs:persistedInputs(group.inputs)" in BATCH_JS
+    assert "if(!(await waitForImage(uploaded.preview_url))) delete uploaded.preview_url;" in BATCH_JS
     assert "targetImages.map(async (targetImage, index)" in BATCH_JS
     assert "Promise.allSettled(submissions)" in BATCH_JS
     assert "data-batch-input-step" in BATCH_JS

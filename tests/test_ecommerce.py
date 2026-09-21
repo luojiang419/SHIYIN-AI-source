@@ -2061,6 +2061,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parent.parent
+        cls.main_source = (root / "main.py").read_text(encoding="utf-8")
         cls.html = (root / "static" / "ecommerce.html").read_text(encoding="utf-8")
         cls.javascript = (root / "static" / "js" / "ecommerce.js").read_text(encoding="utf-8")
         cls.css = (root / "static" / "css" / "ecommerce.css").read_text(encoding="utf-8")
@@ -2498,7 +2499,9 @@ class EcommerceFrontendContractTests(unittest.TestCase):
             "async function handleSelectedFiles(files, role)",
             "await uploadInputPairs(images.map(file => ({file,role})))",
             "function uploadInputPairs(pairs)",
-            "return Promise.all(pairs.map(pair => uploadReferenceFile(pair.file)))",
+            "Promise.allSettled(activePairs.map(pair => uploadReferenceFile(pair.file)))",
+            "function applyUploadFailure(pair, error)",
+            "function waitForImage(url)",
             "function uploadedImageDimensions(uploaded)",
             "data-tryon-stack-step",
             "ec-tryon-transition-card",
@@ -2716,6 +2719,18 @@ class EcommerceFrontendContractTests(unittest.TestCase):
             self.assertIn(marker, self.javascript)
         for ratio in ("1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "9:16", "16:9"):
             self.assertIn(f'data-crop-ratio="{ratio}"', self.html)
+
+    def test_reference_upload_keeps_the_local_preview_until_the_thumbnail_is_ready(self):
+        for marker in (
+            "function waitForImage(url)",
+            "if(previewUrl) {\n            try { await waitForImage(previewUrl); }",
+            "Promise.allSettled(activePairs.map(pair => uploadReferenceFile(pair.file)))",
+            "function applyUploadFailure(pair, error)",
+            "upload_error:message",
+            "if(isLocalPreviewUrl(clean.preview_url)) delete clean.preview_url;",
+        ):
+            self.assertIn(marker, self.javascript)
+        self.assertIn('"preview_url": f"/api/media-preview?w=384&url={urllib.parse.quote(url, safe=\'\')}"', self.main_source)
 
     def test_comparison_always_prefers_pose_then_subject(self):
         self.assertIn('id="compareBeforeLabel"', self.html)

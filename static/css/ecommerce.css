@@ -97,6 +97,7 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-upload-image-trigger:hover img { transform:scale(1.04); }
 .ec-upload-info { min-width:0; }
 .ec-upload-info b, .ec-upload-info span { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.ec-upload-info .is-upload-error { color:var(--ec-danger); }
 .ec-upload-info b { margin-bottom:5px; font-size:11px; }
 .ec-upload-info span { color:var(--ec-muted); font-size:9px; }
 .ec-upload-info .ec-upload-actions { margin-top:13px; }
@@ -3129,6 +3130,9 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     outline: 3px solid var(--ec-accent, #f97316);
     outline-offset: -3px;
 }
+.ec-batch-input-card.is-uploading { cursor:progress; }
+.ec-batch-input-card.has-upload-error { border-color:var(--ec-danger); }
+.ec-batch-input-card.has-upload-error small { color:#ffd7d7; opacity:1; }
 
 .ec-batch-input-card:hover,
 .ec-batch-view-card:hover {

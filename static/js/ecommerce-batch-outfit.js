@@ -4,6 +4,7 @@
     const ACTIVE_STATUSES = new Set(['queued','running','jimeng_pending','recovery_pending']);
     const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
     const TARGET_IMAGE_MAX = 20;
+    const MAX_REFERENCE_UPLOAD_BYTES = 50 * 1024 * 1024;
     const GRID_RATIOS = ['16:9','4:5','1:1','3:4','9:16','4:3','3:2','2:3'];
     const DEFAULT_DEPTH_CONTROLS = {farPoint:0,nearPoint:100,midtone:0,contrast:100,brightness:0,smooth:0,invert:false};
     const INPUTS = [
@@ -41,27 +42,50 @@
     const groupById = id => state.groups.find(group => group.id === id) || null;
     const selectedGroup = () => groupById(state.selectedGroupId) || state.groups[0] || null;
     const uniqueId = () => `outfit_${global.crypto?.randomUUID?.().replaceAll('-','') || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
+    const isLocalPreviewUrl = value => String(value || '').startsWith('blob:');
+    const displayImageUrl = image => String(image?.preview_url || image?.url || '');
     const inputImages = (group, role) => {
         if(role === 'fabric_detail') {
             const targets = inputImages(group, 'target_image');
             const image = group?.fabricDetails?.[targets[group.targetImageIndex || 0]?.url];
-            return image?.url ? [image] : [];
+            return displayImageUrl(image) ? [image] : [];
         }
         const value = group?.inputs?.[role];
-        return (Array.isArray(value) ? value : value?.url ? [value] : []).filter(item => item?.url);
+        return (Array.isArray(value) ? value : displayImageUrl(value) ? [value] : []).filter(item => displayImageUrl(item));
     };
-    const hasRequiredInputs = group => Boolean(group?.inputs?.pose_reference?.url && inputImages(group, 'target_image').length);
+    const hasRequiredInputs = group => Boolean(group?.inputs?.pose_reference?.url && inputImages(group, 'target_image').some(image => image.url));
 
     function cleanImage(value){
-        if(!value || typeof value !== 'object' || !String(value.url || '').trim()) return null;
+        if(!value || typeof value !== 'object' || !displayImageUrl(value)) return null;
         return {
             url:String(value.url || ''),
+            preview_url:String(value.preview_url || ''),
+            uploading:value.uploading === true,
+            upload_token:String(value.upload_token || ''),
+            upload_error:String(value.upload_error || ''),
             name:String(value.name || ''),
             mime:String(value.mime || ''),
             width:Number(value.width || value.natural_w || 0),
             height:Number(value.height || value.natural_h || 0),
             kind:'image',
         };
+    }
+
+    function persistedImage(value){
+        const image = cleanImage(value);
+        if(!image?.url) return null;
+        if(isLocalPreviewUrl(image.preview_url)) delete image.preview_url;
+        delete image.uploading;
+        delete image.upload_token;
+        delete image.upload_error;
+        return image;
+    }
+
+    function persistedInputs(inputs){
+        return Object.fromEntries(Object.entries(inputs || {}).map(([role,value]) => {
+            if(Array.isArray(value)) return [role, value.map(persistedImage).filter(Boolean)];
+            return [role, persistedImage(value)];
+        }).filter(([,value]) => Array.isArray(value) ? value.length : value));
     }
 
     function cleanWork(value){
@@ -150,8 +174,8 @@
             groups:state.groups.map(group => ({
                 id:group.id,
                 style_name:group.styleName,
-                inputs:group.inputs,
-                fabric_details:group.fabricDetails,
+                inputs:persistedInputs(group.inputs),
+                fabric_details:Object.fromEntries(Object.entries(group.fabricDetails || {}).map(([key,image]) => [key,persistedImage(image)]).filter(([,image]) => image)),
                 control_map:group.controlMap,
                 base_control_map:group.baseControlMap,
                 depth_controls:group.depthControls,
@@ -288,6 +312,7 @@
         if(item.role === 'target_image') group.targetImageIndex = Math.max(0, Math.min(images.length - 1, Number(group.targetImageIndex || 0)));
         const selectedIndex = item.role === 'target_image' ? group.targetImageIndex : 0;
         const image = images[selectedIndex] || null;
+        const imageUrl = displayImageUrl(image);
         const hasStack = images.length > 1;
         const stack = hasStack ? `<span class="ec-batch-card-shadow one" aria-hidden="true"></span><span class="ec-batch-card-shadow two" aria-hidden="true"></span>` : '';
         const controls = hasStack ? `<span class="ec-batch-stack-controls">
@@ -301,9 +326,9 @@
                 : `<span class="ec-batch-depth-chip ${group.status === 'preparing' ? 'is-loading' : ''}">${group.status === 'preparing' ? '深度提取中' : '等待深度图'}</span>`
             : '';
         const actionText = item.role === 'target_image' && image ? `继续添加 · ${images.length}/${TARGET_IMAGE_MAX}` : '点击替换';
-        return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''} ${hasStack ? 'has-stack' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}" title="点击选择或拖入图片">
+        return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''} ${hasStack ? 'has-stack' : ''} ${image?.uploading ? 'is-uploading' : ''} ${image?.upload_error ? 'has-upload-error' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}" title="点击选择或拖入图片">
             <span class="ec-batch-input-label">${escapeHtml(item.label)}${item.required ? '<em>*</em>' : ''}</span>
-            ${image ? `<span class="ec-batch-card-stack">${stack}<img src="${escapeHtml(image.url)}" alt="${escapeHtml(item.label)}">${controls}</span><small title="${escapeHtml(image.name || item.hint)}">${escapeHtml(image.name || item.hint)}</small><span class="ec-batch-input-replace">${actionText}</span>${depthStatus}` : `<span class="ec-batch-input-plus">+</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint)}</small>`}
+            ${image ? `<span class="ec-batch-card-stack">${stack}<img src="${escapeHtml(imageUrl)}" decoding="async" alt="${escapeHtml(item.label)}">${controls}</span><small title="${escapeHtml(image.upload_error || image.name || item.hint)}">${escapeHtml(image.uploading ? '正在上传图片' : (image.upload_error || image.name || item.hint))}</small><span class="ec-batch-input-replace">${actionText}</span>${depthStatus}` : `<span class="ec-batch-input-plus">+</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint)}</small>`}
             ${image && item.role === 'pose_reference' && group.controlMap?.url ? '<span class="ec-batch-depth-action" data-batch-adjust-depth role="button" tabindex="0">调整深度图</span>' : ''}
             ${image ? `<span class="ec-batch-input-remove" data-batch-remove-input="${item.role}" data-batch-remove-index="${selectedIndex}" role="button" aria-label="移除${escapeHtml(item.label)}">×</span>` : ''}
         </button>`;
@@ -610,13 +635,34 @@
 
     async function uploadFile(file){
         if(!file || !file.type.startsWith('image/')) throw new Error('请选择 PNG、JPG 或 WEBP 图片');
-        if(file.size > 50 * 1024 * 1024) throw new Error('单张图片不能超过 50MB');
+        if(file.size > MAX_REFERENCE_UPLOAD_BYTES) throw new Error('单张图片不能超过 50MB');
         const form = new FormData();
         form.append('files', file, file.name || 'batch-outfit.png');
         const result = await fetchJson('/api/ai/upload', {method:'POST', body:form});
         const uploaded = result.files?.[0];
         if(!uploaded?.url) throw new Error('图片上传没有返回可用地址');
         return cleanImage({...uploaded, name:uploaded.name || file.name});
+    }
+
+    function pendingImage(file){
+        return cleanImage({
+            url:'', preview_url:URL.createObjectURL(file), uploading:true,
+            upload_token:uniqueId(), name:file.name || '未命名图片', mime:file.type || 'image/png', kind:'image',
+        });
+    }
+
+    function revokePreview(image){
+        if(isLocalPreviewUrl(image?.preview_url)) URL.revokeObjectURL(image.preview_url);
+    }
+
+    function waitForImage(url){
+        if(!url) return Promise.resolve(false);
+        return new Promise(resolve => {
+            const image = new Image();
+            image.onload = () => resolve(true);
+            image.onerror = () => resolve(false);
+            image.src = url;
+        });
     }
 
     async function handleFileSelection(files, target=state.uploadTarget){
@@ -637,38 +683,54 @@
             showToast(`服装参考最多添加 ${TARGET_IMAGE_MAX} 张`, true);
             return;
         }
+        const pendingImages = accepted.map(pendingImage);
+        if(target.role === 'target_image') {
+            group.inputs.target_image = [...currentTargets, ...pendingImages].slice(0, TARGET_IMAGE_MAX);
+            group.targetImageIndex = currentTargets.length;
+        } else if(target.role === 'fabric_detail') {
+            if(!detailGarmentUrl) return showToast('请先选择对应的服装参考', true);
+            (group.fabricDetails ||= {})[detailGarmentUrl] = pendingImages[0];
+        } else group.inputs[target.role] = pendingImages[0];
         group.status = 'uploading';
         group.error = '';
         render();
-        try {
-            const images = await Promise.all(accepted.map(uploadFile));
-            if(target.role === 'target_image') {
-                group.inputs.target_image = [...currentTargets, ...images].slice(0, TARGET_IMAGE_MAX);
-                group.targetImageIndex = currentTargets.length;
-                if(accepted.length < selected.length) showToast(`已达到 ${TARGET_IMAGE_MAX} 张服装参考上限`, true);
-            } else if(target.role === 'fabric_detail') {
-                const garmentUrl = detailGarmentUrl;
-                if(!garmentUrl) throw new Error('请先选择对应的服装参考');
-                (group.fabricDetails ||= {})[garmentUrl] = images[0];
-            } else group.inputs[target.role] = images[0];
-            if(target.role === 'pose_reference') {
-                group.controlMap = null;
-                group.baseControlMap = null;
-                group.depthControls = normalizeDepthControls(null);
-                group.controlSourceUrl = '';
-                group.controlSettingsSignature = '';
+        const results = await Promise.allSettled(accepted.map(uploadFile));
+        const failures = [];
+        for(let index = 0; index < pendingImages.length; index += 1) {
+            const pending = pendingImages[index];
+            const result = results[index];
+            if(result.status === 'fulfilled') {
+                const uploaded = result.value;
+                if(!(await waitForImage(uploaded.preview_url))) delete uploaded.preview_url;
+                revokePreview(pending);
+                if(target.role === 'target_image') {
+                    const images = group.inputs.target_image || [];
+                    const currentIndex = images.findIndex(image => image?.upload_token === pending.upload_token);
+                    if(currentIndex >= 0) images[currentIndex] = uploaded;
+                } else if(target.role === 'fabric_detail') {
+                    if(group.fabricDetails?.[detailGarmentUrl]?.upload_token === pending.upload_token) group.fabricDetails[detailGarmentUrl] = uploaded;
+                } else if(group.inputs[target.role]?.upload_token === pending.upload_token) group.inputs[target.role] = uploaded;
+            } else {
+                const message = String(result.reason?.message || '图片上传失败');
+                failures.push(message);
+                pending.uploading = false;
+                pending.upload_error = message;
             }
-            group.status = 'draft';
-            group.updatedAt = Date.now();
-            persist();
-            render();
-            if(target.role === 'pose_reference') await ensureControlMap(group);
-        } catch(error) {
-            group.status = 'failed';
-            group.error = error.message || '图片上传失败';
-            persist();
-            render();
         }
+        if(target.role === 'pose_reference' && group.inputs.pose_reference?.url) {
+            group.controlMap = null;
+            group.baseControlMap = null;
+            group.depthControls = normalizeDepthControls(null);
+            group.controlSourceUrl = '';
+            group.controlSettingsSignature = '';
+        }
+        group.status = 'draft';
+        group.error = failures.length ? `图片上传失败（${failures.length}/${accepted.length}）：${failures[0]}` : '';
+        group.updatedAt = Date.now();
+        persist();
+        render();
+        if(accepted.length < selected.length) showToast(`已达到 ${TARGET_IMAGE_MAX} 张服装参考上限`, true);
+        if(target.role === 'pose_reference' && group.inputs.pose_reference?.url) await ensureControlMap(group);
     }
 
     function removeInput(groupId, role, index=-1){

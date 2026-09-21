@@ -252,20 +252,17 @@
     function stripUploadPreviewFields(value){
         if(!value || typeof value !== 'object') return value;
         const clean = {...value};
-        delete clean.preview_url;
+        // blob URL 只在当前页面有效；服务端缩略图可安全持久化并避免重新解码原图。
+        if(isLocalPreviewUrl(clean.preview_url)) delete clean.preview_url;
         delete clean.uploading;
         delete clean.upload_token;
+        delete clean.upload_error;
         if(Array.isArray(clean.alternates)) clean.alternates = clean.alternates.map(stripUploadPreviewFields).filter(item => item?.url);
         return clean;
     }
 
     function serializableInputs(inputs){
         return Object.fromEntries(Object.entries(inputs || {}).map(([role,input]) => [role, stripUploadPreviewFields(input)]));
-    }
-
-    function cloneSerializableInput(input){
-        if(!input || typeof input !== 'object') return null;
-        return JSON.parse(JSON.stringify(stripUploadPreviewFields(input)));
     }
 
     function cleanInputCandidate(value){
@@ -275,6 +272,7 @@
             preview_url:String(value.preview_url || ''),
             uploading:value.uploading === true,
             upload_token:String(value.upload_token || ''),
+            upload_error:String(value.upload_error || ''),
             name:String(value.name || ''),
             kind:'image',
             mime:String(value.mime || ''),
@@ -1000,8 +998,8 @@
     function universalUploadHtml(key,item,label){
         const displayUrl = referenceDisplayUrl(item);
         if(displayUrl) {
-            const status = item.uploading ? t('ecommerce.uploading') : formatName(item.name || displayUrl);
-            return `<div class="ec-upload-preview ${item.uploading ? 'is-uploading' : ''}"><button type="button" class="ec-upload-image-trigger" data-preview-reference="${escapeHtml(key)}" title="${escapeHtml(t('ecommerce.openReferencePreview'))}"><img src="${escapeHtml(displayUrl)}" alt="${escapeHtml(label)}"></button><div class="ec-upload-info"><b>${escapeHtml(label)}</b><span title="${escapeHtml(item.name || displayUrl)}">${escapeHtml(status)}</span><div class="ec-upload-actions"><button type="button" data-action="upload">${escapeHtml(t('ecommerce.replace'))}</button><button type="button" data-action="assets">${escapeHtml(t('ecommerce.fromAssets'))}</button><button type="button" data-action="remove">${escapeHtml(t('ecommerce.remove'))}</button></div></div></div>`;
+            const status = item.uploading ? t('ecommerce.uploading') : (item.upload_error || formatName(item.name || displayUrl));
+            return `<div class="ec-upload-preview ${item.uploading ? 'is-uploading' : ''} ${item.upload_error ? 'is-upload-error' : ''}"><button type="button" class="ec-upload-image-trigger" data-preview-reference="${escapeHtml(key)}" title="${escapeHtml(t('ecommerce.openReferencePreview'))}"><img src="${escapeHtml(displayUrl)}" decoding="async" alt="${escapeHtml(label)}"></button><div class="ec-upload-info"><b>${escapeHtml(label)}</b><span title="${escapeHtml(item.upload_error || item.name || displayUrl)}">${escapeHtml(status)}</span><div class="ec-upload-actions"><button type="button" data-action="upload">${escapeHtml(t('ecommerce.replace'))}</button><button type="button" data-action="assets">${escapeHtml(t('ecommerce.fromAssets'))}</button><button type="button" data-action="remove">${escapeHtml(t('ecommerce.remove'))}</button></div></div></div>`;
         }
         return `<div class="ec-upload-empty" data-action="upload" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg><b>${escapeHtml(label)}</b><small>${escapeHtml(t('ecommerce.dropOrChoose'))}</small><span class="ec-upload-actions"><button type="button" data-action="assets">${escapeHtml(t('ecommerce.fromAssets'))}</button></span></div>`;
     }
@@ -1901,12 +1899,12 @@
                     <div class="ec-tryon-card-stack" aria-label="${escapeHtml(displayLabel)}">
                         ${hasStack ? '<span class="ec-tryon-card-shadow one"></span><span class="ec-tryon-card-shadow two"></span>' : ''}
                         ${outgoingCard}
-                        <button type="button" class="ec-upload-image-trigger ec-tryon-active-card" data-preview-reference="${escapeHtml(input.role)}" title="${escapeHtml(t('ecommerce.openReferencePreview'))}"><img src="${escapeHtml(displayUrl)}" alt="${escapeHtml(displayLabel)}"></button>
+                        <button type="button" class="ec-upload-image-trigger ec-tryon-active-card" data-preview-reference="${escapeHtml(input.role)}" title="${escapeHtml(t('ecommerce.openReferencePreview'))}"><img src="${escapeHtml(displayUrl)}" decoding="async" alt="${escapeHtml(displayLabel)}"></button>
                         ${stackControls}
                     </div>
                     <div class="ec-upload-info">
                         ${visibleSlotLabel}
-                        <span title="${escapeHtml(asset.name || displayUrl)}">${escapeHtml(asset.uploading ? t('ecommerce.uploading') : formatName(asset.name || displayUrl))}</span>
+                        <span class="${asset.upload_error ? 'is-upload-error' : ''}" title="${escapeHtml(asset.upload_error || asset.name || displayUrl)}">${escapeHtml(asset.uploading ? t('ecommerce.uploading') : (asset.upload_error || formatName(asset.name || displayUrl)))}</span>
                         <div class="${actionClass}">
                             ${actionButton('upload', uploadActionLabel)}
                             ${actionButton('assets', t('ecommerce.fromAssets'))}
@@ -2366,6 +2364,15 @@
         });
     }
 
+    function waitForImage(url){
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(url);
+            image.onerror = () => reject(new Error(t('ecommerce.uploadFailed')));
+            image.src = url;
+        });
+    }
+
     function uploadFileValidationError(file){
         if(!isSupportedImageFile(file)) {
             return t('ecommerce.invalidImage');
@@ -2385,10 +2392,6 @@
         return uploaded;
     }
 
-    async function uploadReferenceFilesInParallel(pairs){
-        return Promise.all(pairs.map(pair => uploadReferenceFile(pair.file)));
-    }
-
     async function uploadedImageDimensions(uploaded){
         const width = Number(uploaded?.width || 0);
         const height = Number(uploaded?.height || 0);
@@ -2398,22 +2401,6 @@
 
     function uploadToken(){
         return `upload_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`;
-    }
-
-    function uploadBaselineForPairs(pairs){
-        const baselines = new Map();
-        pairs.forEach(pair => {
-            if(!baselines.has(pair.role)) baselines.set(pair.role, cloneSerializableInput(state.inputs[pair.role]));
-        });
-        return baselines;
-    }
-
-    function restoreUploadBaselines(baselines){
-        baselines.forEach((input, role) => {
-            revokeInputPreviewUrls(state.inputs[role]);
-            if(input) state.inputs[role] = input;
-            else delete state.inputs[role];
-        });
     }
 
     function buildPreviewInput(file, role, token, previewUrl){
@@ -2457,8 +2444,14 @@
 
     async function uploadedInputFor(file, role, uploaded, existing){
         const dimensions = await uploadedImageDimensions(uploaded);
+        let previewUrl = String(uploaded.preview_url || '');
+        // 先完成服务端缩略图解码，再替换仍在展示的本地 blob，避免大图上传完成时闪空白。
+        if(previewUrl) {
+            try { await waitForImage(previewUrl); }
+            catch(error) { previewUrl = ''; }
+        }
         const nextInput = stripUploadPreviewFields({
-            ...existing, ...uploaded, role:existing.reference_type || role, reference_id:existing.reference_id || role, reference_type:existing.reference_type || (role === 'source' ? 'source' : role), ...dimensions,
+            ...existing, ...uploaded, preview_url:previewUrl, role:existing.reference_type || role, reference_id:existing.reference_id || role, reference_type:existing.reference_type || (role === 'source' ? 'source' : role), ...dimensions,
             original_url:uploaded.url, original_name:uploaded.name || file.name, original_width:dimensions.width, original_height:dimensions.height,
             crop_history:[],
         });
@@ -2479,8 +2472,8 @@
                 if(isLocalPreviewUrl(previewUrl)) URL.revokeObjectURL(previewUrl);
                 return;
             }
-            revokeReferencePreviewUrl(candidates[candidateIndex]);
             const uploadedCandidate = await uploadedInputFor(file, role, uploaded, {...existing, ...candidates[candidateIndex]});
+            revokeReferencePreviewUrl(candidates[candidateIndex]);
             candidates[candidateIndex] = cleanInputCandidate(uploadedCandidate);
             const selectedIndex = existing.upload_token === token || candidates[tryOnSelectedReferenceIndex(existing, candidates)]?.upload_token === token
                 ? candidateIndex
@@ -2492,10 +2485,28 @@
                 if(isLocalPreviewUrl(previewUrl)) URL.revokeObjectURL(previewUrl);
                 return;
             }
+            const uploadedInput = await uploadedInputFor(file, role, uploaded, existing);
             revokeReferencePreviewUrl(existing);
-            state.inputs[role] = await uploadedInputFor(file, role, uploaded, existing);
+            state.inputs[role] = uploadedInput;
         }
         return;
+    }
+
+    function applyUploadFailure(pair, error){
+        const {role, upload_token:token, preview_url:previewUrl} = pair;
+        const message = String(error?.message || t('ecommerce.uploadFailed'));
+        if(state.operation === 'try_on' && isTryOnReferenceRole(role)) {
+            const existing = state.inputs[role] || {};
+            const candidates = tryOnReferenceCandidates(existing);
+            const index = candidates.findIndex(candidate => candidate.upload_token === token);
+            if(index >= 0) {
+                candidates[index] = {...candidates[index], uploading:false, upload_error:message};
+                state.inputs[role] = buildTryOnInput(role, existing, candidates, tryOnSelectedReferenceIndex(existing, candidates));
+            }
+            return;
+        }
+        const existing = state.inputs[role] || {};
+        if(existing.upload_token === token) state.inputs[role] = {...existing, preview_url:previewUrl, uploading:false, upload_error:message};
     }
 
     async function uploadInputPairs(pairs){
@@ -2511,23 +2522,33 @@
         const originalLabel = el.generateButton.querySelector('span')?.textContent || '';
         const label = el.generateButton.querySelector('span');
         if(label) label.textContent = t('ecommerce.uploading');
-        const baselines = uploadBaselineForPairs(uploadPairs);
         const activePairs = uploadPairs.map(applyPreviewInput);
         renderInputs();
         validateForm(false);
         try {
-            const uploadedFiles = await uploadReferenceFilesInParallel(activePairs);
+            const results = await Promise.allSettled(activePairs.map(pair => uploadReferenceFile(pair.file)));
+            const failures = [];
             for(let index=0; index<activePairs.length; index += 1) {
-                await applyUploadedInput(activePairs[index], uploadedFiles[index]);
+                const result = results[index];
+                if(result.status === 'fulfilled') {
+                    try {
+                        await applyUploadedInput(activePairs[index], result.value);
+                    } catch(error) {
+                        applyUploadFailure(activePairs[index], error);
+                        failures.push(error);
+                    }
+                } else {
+                    applyUploadFailure(activePairs[index], result.reason);
+                    failures.push(result.reason);
+                }
             }
             renderInputs();
             validateForm(false);
             persistSettings();
-        } catch(error) {
-            restoreUploadBaselines(baselines);
-            renderInputs();
-            validateForm(false);
-            showFormError(`${t('ecommerce.uploadFailed')}：${error.message}`);
+            if(failures.length) {
+                const detail = String(failures[0]?.message || t('ecommerce.uploadFailed'));
+                showFormError(`${t('ecommerce.uploadFailed')}（${failures.length}/${activePairs.length}）：${detail}`);
+            }
         } finally {
             el.generateButton.disabled = false;
             if(label) label.textContent = originalLabel;

@@ -13788,7 +13788,13 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
         register_internal_media_object(url, "input", kind, "ai-upload")
         item = {"url": url, "name": file.filename or filename, "kind": kind, "mime": content_type}
         if kind == "image":
-            item.update({"width": image_width, "height": image_height, "orientation_normalized": orientation_normalized})
+            # 卡片预览不应重新解码原始高分辨率文件；原图 URL 仍保留给生成链路使用。
+            item.update({
+                "width": image_width,
+                "height": image_height,
+                "orientation_normalized": orientation_normalized,
+                "preview_url": f"/api/media-preview?w=384&url={urllib.parse.quote(url, safe='')}",
+            })
         uploaded.append(item)
     return {"files": uploaded}
 

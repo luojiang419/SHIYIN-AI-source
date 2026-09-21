@@ -1,4 +1,4 @@
-// 隔离真实浏览器验证：请求时序、脏快照保护、慢服务和单节点资源恢复。
+// 隔离真实浏览器验证：请求时序、旧快照隔离、慢服务和单节点资源恢复。
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const base=process.argv[2] || 'http://127.0.0.1:3038';
@@ -11,12 +11,11 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
  const browser=await chromium.launch({headless:true,channel:'msedge'});
  const report=[];
  try{
-  for(const scenario of (process.env.CANVAS_TEST_SCENARIOS?.split(',') || ['shell-cache','list-cache','list-timeout','dirty-cache','slow-assets','slow-capability','slow-media','failed-media','cache-error','cache-open-stalled','account-retry'])){
+   for(const scenario of (process.env.CANVAS_TEST_SCENARIOS?.split(',') || ['shell-cache','list-cache','list-timeout','stale-canvas-snapshot','slow-assets','slow-capability','slow-media','failed-media','account-retry'])){
    const context=await browser.newContext({viewport:{width:1440,height:900}});
-   const page=await context.newPage();const errors=[],requests=[],saves=[];let release,fail=true,storageFailure=true;
+    const page=await context.newPage();const errors=[],requests=[],saves=[];let release,fail=true;
    if(process.env.CANVAS_TEST_SCRIPT) await page.route('**/static/js/canvas.js?*',r=>r.fulfill({contentType:'application/javascript',body:require('node:fs').readFileSync(process.env.CANVAS_TEST_SCRIPT)}));
    const gate=new Promise(resolve=>release=resolve);const started=Date.now();
-   if(scenario==='cache-open-stalled')await page.addInitScript(()=>Object.defineProperty(window,'indexedDB',{value:{open:()=>({})}}));
    page.on('pageerror',e=>errors.push(e.message));
    page.on('request',r=>requests.push({url:r.url(),at:Date.now()-started}));
    let accountReads=0;
@@ -44,11 +43,9 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
    await page.route('**/assets/input/cold.png',serveMedia);
    await page.route('**/api/canvas-assets/check',async r=>{if(scenario==='slow-assets')await gate;await r.fulfill({json:{exists:{'/assets/input/cold.png':true}}}).catch(()=>{});});
    await page.route('**/api/minimax-h3/status',async r=>{if(scenario==='slow-capability')await gate;await r.fulfill({json:{generation_enabled:true,resolutions:[],defaults:{}}}).catch(()=>{});});
-   if(['shell-cache','list-cache','dirty-cache','cache-error'].includes(scenario)){
-    const local=structuredClone(data);local.nodes[1].prompt='local unsynced text';
-    const record=scenario==='shell-cache' ? {schema:1,value:{page:'ecommerce'}} : scenario==='list-cache'
-     ?{schema:1,value:{projects:[{id:'stale',name:'旧缓存'}],canvases:[{id:'stale'}],currentProjectId:'stale',viewport:{x:0,y:0,scale:1}}}
-     :{schema:1,value:{canvas:local,config,dirty:true,selected:[]}};
+    if(['shell-cache','list-cache'].includes(scenario)){
+      const record=scenario==='shell-cache' ? {schema:1,value:{page:'ecommerce'}}
+       :{schema:1,value:{projects:[{id:'stale',name:'旧缓存'}],canvases:[{id:'stale'}],currentProjectId:'stale',viewport:{x:0,y:0,scale:1}}};
     await page.addInitScript(()=>{window.__cacheGate=new Promise(resolve=>window.__releaseCache=resolve);});
     if(scenario==='shell-cache'){
      await page.addInitScript(()=>localStorage.setItem('studio_active_page','canvas'));
@@ -56,21 +53,20 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
     }
     await page.route('**/static/js/studio-page-state.js*',async r=>{
      const response=await r.fetch();let body=await response.text();
-     if(scenario==='cache-error'){
-      if(storageFailure) body=body.replace('const db = await database();','const db = null;');
-     }else body=body.replace('let initial=readInitial();',`let initial=readInitial();if(${scenario==='shell-cache' ? "name==='shell'" : 'true'}) initial.promise=window.__cacheGate.then(()=>(${JSON.stringify(record)}));`);
-     await r.fulfill({response,body});
-    });
-    if(scenario==='cache-error'){
+      body=body.replace('let initial=readInitial();',`let initial=readInitial();if(${scenario==='shell-cache' ? "name==='shell'" : 'true'}) initial.promise=window.__cacheGate.then(()=>(${JSON.stringify(record)}));`);
+      await r.fulfill({response,body});
+     });
+    }
+    if(scenario==='stale-canvas-snapshot'){
+     const stale={schema:1,value:{canvas:{...structuredClone(data),nodes:[{id:'text',type:'prompt',prompt:'stale cached text',x:400,y:0}]},config,dirty:true,selected:[]}};
      await page.goto(base+'/fixture.png');
      await page.evaluate(record=>new Promise((resolve,reject)=>{
       const req=indexedDB.open('shiyin-page-state-v1',1);
       req.onupgradeneeded=()=>req.result.createObjectStore('pages');
       req.onerror=()=>reject(req.error);
       req.onsuccess=()=>{const db=req.result,tx=db.transaction('pages','readwrite');tx.objectStore('pages').put(record,'cold-test:canvas:cold');tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);};
-     }),record);
+     }),stale);
     }
-   }
    if(scenario==='list-timeout')await page.addInitScript(()=>{
     const originalFetch=window.fetch,originalTimer=window.setTimeout;
     window.__listCalls=0;
@@ -95,46 +91,19 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
     await page.evaluate(()=>window.__releaseCache());await page.waitForTimeout(200);
     assert(await page.getByText('远程工程',{exact:true}).count());
     assert.equal(await page.getByText('旧缓存',{exact:true}).count(),0);
-   }else if(scenario==='dirty-cache'){
-    await page.waitForFunction(()=>!!document.querySelector('#nodes img')?.naturalWidth);
-    assert(requests.some(r=>r.url.includes('/api/media-preview')),'缓存未返回也须加载首屏媒体');
-    await page.evaluate(()=>{checkpointCanvasPage(true);void saveCanvas();});assert.equal(saves.length,0);
-    assert(await page.locator('#shell').evaluate(el=>el.inert),'缓存结论未知时不能编辑或保存');
-    await page.evaluate(()=>window.__releaseCache());
-    await page.waitForFunction(()=>!document.getElementById('shell').inert);
-    await page.waitForFunction(()=>!savingCanvasNow);
-    assert.equal(await page.evaluate(()=>nodes.find(n=>n.id==='text').prompt),'local unsynced text');
-    assert(saves.length && saves.every(s=>s.nodes.find(n=>n.id==='text').prompt==='local unsynced text'));
+    }else if(scenario==='stale-canvas-snapshot'){
+     await page.waitForFunction(()=>!document.getElementById('shell').inert);
+     assert.equal(await page.evaluate(()=>nodes.find(n=>n.id==='text').prompt),'server text','旧 IndexedDB 快照不得覆盖服务端工程');
+     await page.waitForFunction(async()=>new Promise(resolve=>{
+      const req=indexedDB.open('shiyin-page-state-v1');
+      req.onsuccess=()=>{const db=req.result,read=db.transaction('pages').objectStore('pages').get('cold-test:canvas:cold');read.onsuccess=()=>{db.close();resolve(!read.result);};};
+     }));
    }else if(scenario==='account-retry'){
     await page.waitForFunction(()=>!document.getElementById('shell').inert || window.canvasEntryOverlay?.el.querySelector('button'));
     if(await page.locator('.canvas-entry-progress').count()) await page.getByRole('button',{name:'重试',exact:true}).click();
     await page.waitForFunction(()=>!document.getElementById('shell').inert);
     assert(accountReads>=2,'账号预检暂时失败后可以重试');
-   }else if(scenario==='cache-open-stalled'){
-    await page.waitForFunction(()=>document.querySelector('#nodes img')?.naturalWidth>0);
-    assert(await page.locator('#shell').evaluate(el=>el.inert),'图片可见不能作为已可交互的证据');
-    await page.waitForFunction(()=>!document.getElementById('shell').inert,null,{timeout:3500});
-    assert(await page.evaluate(()=>JSON.parse(localStorage.getItem('shiyin-page-recovery-v1:cold-test:canvas:cold'))?.active),'存储超时必须保留旧槽位并创建新恢复记录');
-   }else if(scenario==='cache-error'){
-    await page.waitForFunction(()=>!document.getElementById('shell').inert);
-    assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false,'可选缓存失败不再阻止进入');
-    assert.equal(await page.locator('#canvasRecoveryNotice').count(),0,'缓存失败不弹出恢复记录提示');
-    await page.evaluate(async()=>{nodes.find(n=>n.id==='text').prompt='new server edit';scheduleSave();await saveCanvas();});
-    assert(saves.some(s=>s.nodes.find(n=>n.id==='text').prompt==='new server edit'));
-    const pointer=await page.evaluate(()=>JSON.parse(localStorage.getItem('shiyin-page-recovery-v1:cold-test:canvas:cold')));
-    assert(pointer.active.startsWith('cold-test:canvas:cold::recovery:'));
-    assert(pointer.archived.includes('cold-test:canvas:cold'));
-    storageFailure=false;await page.reload();
-    await page.waitForFunction(()=>!document.getElementById('shell').inert);
-    assert.equal(await page.evaluate(()=>nodes.find(n=>n.id==='text').prompt),'new server edit','重启不得重新应用旧脏快照');
-    assert.equal(await page.locator('#canvasRecoveryNotice').count(),0,'重启后不弹出旧恢复记录提示');
-    const recovery=await page.evaluate(key=>new Promise((resolve,reject)=>{
-     const req=indexedDB.open('shiyin-page-state-v1',1);
-     req.onerror=()=>reject(req.error);
-     req.onsuccess=()=>{const db=req.result,tx=db.transaction('pages','readonly'),read=tx.objectStore('pages').get(key);tx.oncomplete=()=>{db.close();resolve(read.result);};tx.onerror=()=>reject(tx.error);};
-    }),pointer.archived[0]);
-    assert.equal(recovery.value.canvas.nodes.find(n=>n.id==='text').prompt,'local unsynced text','移除提示后旧记录仍完整保留');
-   }else{
+    }else{
     await page.waitForFunction(()=>!document.getElementById('shell').inert,{},{timeout:3500});
     assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false);
     if(scenario==='slow-media'){

@@ -71,12 +71,13 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
         self.assertIn("target.src.includes('/static/canvas-list.html')", INDEX_HTML)
         self.assertIn("requestIdleCallback(prewarmCanvasEditor", INDEX_HTML)
 
-    def test_classic_canvas_schedules_secondary_work_after_both_render_paths(self):
+    def test_classic_canvas_does_not_restore_persisted_snapshots(self):
         body = function_body(CANVAS_JS, "async function openCanvas(id)", "function canvasEntryResourceVisible")
-        # 磁盘恢复和首次打开是两个分支，不能把后一个分支的 render 与前一个分支比较。
-        self.assertLess(body.index("restoreCanvasPage(saved,session)"), body.index("session.afterPaint(startCanvasSecondaryStartup)"))
         render_at = body.index("render();")
         self.assertLess(render_at, body.index("session.afterPaint(startCanvasSecondaryStartup)", render_at))
+        self.assertNotIn("StudioPageState", body)
+        self.assertNotIn("restoreCanvasPage", CANVAS_JS)
+        self.assertNotIn("captureCanvasPage", CANVAS_JS)
         self.assertIn("async function startCanvasSecondaryStartup(session)", CANVAS_JS)
         self.assertNotIn("await touchCanvasOpened", body)
         self.assertNotIn("await refreshMissingCanvasAssets", body)

@@ -232,10 +232,8 @@
     }
     // 仅在删除已成功或服务器明确报告不存在时调用，防止恢复后复用已删除实例。
     function invalidate(id){
-        void window.StudioPageState?.session(`canvas:${id}`).remove();
         for(const entry of [...editors]){
             if((editorState(entry)?.id || entry.id) !== id) continue;
-            entry.frame.contentWindow?.CanvasSessionLifecycle?.forgetCheckpoint?.();
             if(entry === current) back(entry.frame.contentWindow);
             entry.frame.remove();
             const index = editors.indexOf(entry);

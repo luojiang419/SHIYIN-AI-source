@@ -29,7 +29,7 @@ const base=process.argv[2] || 'http://127.0.0.1:13382';
   await page.frameLocator('#frame-canvas').locator('.ws-card[data-canvas-id="input-test"]').click();
   await page.waitForFunction(()=>document.getElementById('frame-canvas')?.contentWindow?.CanvasSessionLifecycle?.state().id==='input-test');
   const editor=await page.locator('#frame-canvas').elementHandle().then(e=>e.contentFrame());
-  await editor.waitForFunction(()=>!document.getElementById('shell').inert && !canvasSnapshotPending);
+  await editor.waitForFunction(()=>!document.getElementById('shell').inert);
   const prompt=editor.locator('.node[data-id="prompt"] .node-title');
   await prompt.waitFor();
   const before=await editor.evaluate(()=>({x:nodes.find(n=>n.id==='prompt').x,y:nodes.find(n=>n.id==='prompt').y}));

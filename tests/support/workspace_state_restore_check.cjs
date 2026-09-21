@@ -190,17 +190,16 @@ async function checkpoint(page,name){
             await page.waitForFunction(()=>!document.getElementById('depthOutputCanvas').hidden && document.querySelector('[data-depth-field="brightness"]').value==='31');
             api.release();results.push({page:'depth-map-tuner',restoredFileAndResult:true});await page.close();
         }
-        // 画布冷启动使用最近数据和配置，在启动 GET 被阻塞时仍能修改节点。
+        // 画布只从服务端读取；已保存内容重新打开后保持一致，不使用本地工程快照。
         {
             const page=await browser.newPage(),api=await fixture(page);
             await page.goto(`${base}/static/canvas.html?id=workspace-cold`);
             const input=page.locator('[data-id="prompt"] [contenteditable="true"]');
             await input.fill('冷启动前的节点');await page.waitForFunction(()=>!localCanvasDirty && !savingCanvasNow);
-            await checkpoint(page,'canvas:workspace-cold');api.block();await page.reload({waitUntil:'domcontentloaded'});
+            await page.reload({waitUntil:'domcontentloaded'});
             await page.waitForFunction(()=>typeof nodes!=='undefined' && nodes.find(n=>n.id==='prompt')?.text==='冷启动前的节点');
-            await input.fill('网络返回前的新节点输入');api.release();await sleep(800);
-            assert.equal(await input.innerText(),'网络返回前的新节点输入');
-            results.push({page:'canvas',editableBeforeNetwork:true});await page.close();
+            assert.equal(await input.innerText(),'冷启动前的节点');
+            results.push({page:'canvas',serverBackedReload:true});await page.close();
         }
         // 主框架全部页面热驻留，超过旧 15 分钟回收阈值也不销毁文档。
         {

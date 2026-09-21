@@ -85,6 +85,37 @@
             } catch(error){ databasePromise=null;unavailable();finish(null); }
         });
     }
+    function isLegacyCanvasSnapshotKey(key){
+        return typeof key === 'string' && key.includes(':canvas:');
+    }
+    async function purgeLegacyCanvasSnapshots(){
+        try {
+            for(let index=localStorage.length-1; index>=0; index--){
+                const key=localStorage.key(index);
+                if(key?.startsWith(RECOVERY_POINTER) && isLegacyCanvasSnapshotKey(key.slice(RECOVERY_POINTER.length))){
+                    localStorage.removeItem(key);
+                }
+            }
+            const db=await database();
+            if(!db) return;
+            await new Promise(resolve=>{
+                let transaction;
+                const finish=()=>{clearTimeout(timeout);resolve();};
+                const timeout=setTimeout(()=>{try{transaction?.abort();}catch(error){}finish();},STORAGE_TIMEOUT_MS);
+                try {
+                    transaction=db.transaction('pages','readwrite');
+                    const request=transaction.objectStore('pages').openCursor();
+                    request.onsuccess=()=>{
+                        const cursor=request.result;
+                        if(!cursor) return;
+                        if(isLegacyCanvasSnapshotKey(cursor.key)) cursor.delete();
+                        cursor.continue();
+                    };
+                    transaction.oncomplete=transaction.onerror=transaction.onabort=finish;
+                } catch(error) { finish(); }
+            });
+        } catch(error) {}
+    }
     function session(name){
         if(sessions.has(name)) return sessions.get(name);
         let revision=0, capture=null, pending=null, latest=null, flushing=null, scheduled=0, hydrated=false, discarded=false;
@@ -211,7 +242,9 @@
         });
         await Promise.allSettled(writes);
     }
-    window.StudioPageState={configure,ready,session,close,flushAll,get accountId(){return account;}};
+    window.StudioPageState={configure,ready,session,close,flushAll,purgeLegacyCanvasSnapshots,get accountId(){return account;}};
+    // 画布工程改为只从服务端加载，清除旧版本留下的本地工程快照，避免任何旧入口再次使用它们。
+    void purgeLegacyCanvasSnapshots();
     // 主框架由原有鉴权流程 configure；独立页面自行验证账号后才能读缓存。
     if(window.parent===window && !['/','/static/index.html'].includes(location.pathname)){
         void verifyAccount();

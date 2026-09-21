@@ -25,6 +25,7 @@ else:
 
 LAB_ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_REQUEST_ID = ""
+PERSON_MASK_NAME = "human_segmentation_pphumanseg_2023mar.onnx"
 
 
 def emit(event_type: str, **payload: Any) -> None:
@@ -211,6 +212,59 @@ def encode_gray_video(frames: np.ndarray, fps: float, output: Path) -> None:
         raise RuntimeError(f"FFmpeg 深度视频编码失败：{stderr.strip()}")
 
 
+def extract_person_masks(frames: np.ndarray) -> np.ndarray:
+    import cv2
+
+    model_root = Path(os.getenv("SHIYIN_VIDEO_DEPTH_MODEL_ROOT") or LAB_ROOT / "runtime" / "models")
+    model_path = model_root / "person-mask" / PERSON_MASK_NAME
+    if not model_path.is_file():
+        raise FileNotFoundError("人物分割模型尚未安装，请重新开始任务以完成组件准备")
+    try:
+        net = cv2.dnn.readNet(str(model_path))
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+    except cv2.error as error:
+        raise RuntimeError("人物分割模型加载失败") from error
+    masks: list[np.ndarray] = []
+    detected_frames = 0
+    total = max(len(frames), 1)
+    for index, frame in enumerate(frames):
+        rgb = cv2.resize(frame, (192, 192), interpolation=cv2.INTER_AREA).astype(np.float32) / 127.5 - 1.0
+        net.setInput(cv2.dnn.blobFromImage(rgb))
+        try:
+            prediction = net.forward()
+        except cv2.error as error:
+            raise RuntimeError(f"第 {index + 1} 帧人物分割失败") from error
+        if prediction.shape != (1, 2, 192, 192) or not np.isfinite(prediction).all():
+            raise RuntimeError(f"第 {index + 1} 帧人物分割输出无效")
+        probability = cv2.resize(
+            prediction[0, 1],
+            (frame.shape[1], frame.shape[0]),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        matte = np.clip((probability - 0.42) / 0.4, 0.0, 1.0)
+        if np.count_nonzero(probability > 0.5) >= 16:
+            detected_frames += 1
+        else:
+            matte.fill(0.0)
+        masks.append(np.rint(matte * 255.0).astype(np.uint8))
+        if index == 0 or (index + 1) % max(1, total // 20) == 0 or index + 1 == total:
+            progress(82 + round((index + 1) / total * 6), f"人物分割 {index + 1}/{total} 帧")
+    if detected_frames == 0:
+        raise ValueError("没有识别到人物，请使用人物清晰的视频或切换专业模式")
+    return np.stack(masks, axis=0)
+
+
+def apply_person_masks(frames: np.ndarray, masks: np.ndarray | None) -> np.ndarray:
+    output = np.asarray(frames, dtype=np.uint8)
+    if masks is None:
+        return output
+    mask_values = np.asarray(masks, dtype=np.float32)
+    if output.shape != mask_values.shape:
+        raise ValueError("深度视频与人物掩码尺寸不一致")
+    return np.rint(output.astype(np.float32) * (mask_values / 255.0)).astype(np.uint8)
+
+
 def run_infer(args: argparse.Namespace) -> dict[str, Any]:
     started = time.perf_counter()
     input_path = Path(args.input).resolve()
@@ -225,14 +279,25 @@ def run_infer(args: argparse.Namespace) -> dict[str, Any]:
     depths, gpu_memory = infer_depths(LAB_ROOT, profile.key, frames, fps, args.input_size, progress)
     if depths.shape[0] != frames.shape[0]:
         raise RuntimeError(f"模型输出帧数 {depths.shape[0]} 与输入帧数 {frames.shape[0]} 不一致")
-    progress(82, "正在归一化 Relative Depth")
-    normalized, normalization = normalize_relative_depth(depths)
+    extraction_mode = str(getattr(args, "extraction_mode", "professional"))
+    if extraction_mode not in {"person", "professional"}:
+        raise ValueError("提取模式必须是 person 或 professional")
+    masks = None
+    if extraction_mode == "person":
+        progress(82, "正在自动分割人物")
+        masks = extract_person_masks(frames)
+    progress(88 if masks is not None else 82, "正在归一化 Relative Depth")
+    normalized, normalization = normalize_relative_depth(depths, masks > 127 if masks is not None else None)
     raw_path = output_dir / "depth-relative-normalized.npz"
-    np.savez_compressed(raw_path, depths=normalized.astype(np.float16), fps=np.float32(fps))
+    raw_payload = {"depths": normalized.astype(np.float16), "fps": np.float32(fps)}
+    if masks is not None:
+        raw_payload["masks"] = masks
+    np.savez_compressed(raw_path, **raw_payload)
     controls = DepthControls.from_mapping(json.loads(args.params_json))
     video_path = output_dir / "depth-preview.mp4"
-    progress(88, "正在应用深度参数并编码 H.264")
-    encode_gray_video(apply_depth_controls(normalized, controls), fps, video_path)
+    progress(90, "正在应用深度参数并编码 H.264")
+    encoded_frames = apply_person_masks(apply_depth_controls(normalized, controls), masks)
+    encode_gray_video(encoded_frames, fps, video_path)
     elapsed = time.perf_counter() - started
     metadata = {
         "schema": "shiyin.video-depth-lab/v1",
@@ -255,6 +320,12 @@ def run_infer(args: argparse.Namespace) -> dict[str, Any]:
             "inferenceSeed": 0,
         },
         "parameters": controls.as_camel_dict(),
+        "extractionMode": extraction_mode,
+        "personSegmentation": {
+            "enabled": masks is not None,
+            "model": PERSON_MASK_NAME if masks is not None else None,
+            "detectedFrames": int(np.count_nonzero(np.any(masks > 127, axis=(1, 2)))) if masks is not None else None,
+        },
         "normalization": normalization,
         "gpuMemory": gpu_memory,
         "elapsedSeconds": round(elapsed, 3),
@@ -275,9 +346,11 @@ def run_postprocess(args: argparse.Namespace) -> dict[str, Any]:
     depths = np.asarray(payload["depths"], dtype=np.float32)
     fps = float(payload["fps"])
     controls = DepthControls.from_mapping(json.loads(args.params_json))
+    masks = np.asarray(payload["masks"], dtype=np.uint8) if "masks" in payload.files else None
     output = Path(args.output).resolve()
     progress(20, "正在应用深度参数")
-    encode_gray_video(apply_depth_controls(depths, controls), fps, output)
+    encoded_frames = apply_person_masks(apply_depth_controls(depths, controls), masks)
+    encode_gray_video(encoded_frames, fps, output)
     progress(100, "参数预览视频已更新")
     return {"outputVideoPath": str(output), "parameters": controls.as_camel_dict(), "fps": fps}
 
@@ -309,6 +382,7 @@ def run_batch(args: argparse.Namespace) -> dict[str, Any]:
             input_size=int(item.get("inputSize") or profile.default_input_size),
             target_fps=float(item.get("targetFps", -1)), max_frames=int(item.get("maxFrames", -1)),
             max_resolution=int(item.get("maxResolution", -1)),
+            extraction_mode=str(item.get("extractionMode") or getattr(args, "extraction_mode", "professional")),
             params_json=json.dumps(item.get("parameters") or {}, ensure_ascii=False),
         )
         try:
@@ -365,6 +439,7 @@ def run_stdio() -> int:
                 target_fps=float(request.get("target_fps", -1)),
                 max_frames=int(request.get("max_frames", -1)),
                 max_resolution=int(request.get("max_resolution", -1)),
+                extraction_mode=str(request.get("extraction_mode") or "professional"),
                 params_json=json.dumps(request.get("params") or {}, ensure_ascii=False),
             )
             emit("result", result=run_infer(args))
@@ -391,6 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
     infer.add_argument("--target-fps", type=float, default=-1.0)
     infer.add_argument("--max-frames", type=int, default=-1)
     infer.add_argument("--max-resolution", type=int, default=-1)
+    infer.add_argument("--extraction-mode", choices=["person", "professional"], default="professional")
     infer.add_argument("--params-json", default="{}")
 
     post = subparsers.add_parser("postprocess")
@@ -401,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--manifest", required=True)
     batch.add_argument("--output-root", required=True)
     batch.add_argument("--model", choices=sorted(MODEL_PROFILES), default="vda_small_fp16_relative")
+    batch.add_argument("--extraction-mode", choices=["person", "professional"], default="professional")
     serve = subparsers.add_parser("serve")
     # Keep infer-shaped arguments for older launch wrappers that inspect the command.
     serve.add_argument("--model")

@@ -25,7 +25,7 @@
         <section class="queue-panel panel">
           <header class="panel-head"><div><span class="eyebrow">QUEUE</span><h2>待处理视频</h2></div><button class="text-button" data-action="clear">清空队列</button></header>
           <section class="left-configuration" aria-label="批量提取设置">
-            <div class="compact-setting"><span class="eyebrow">MODEL</span><label>深度模型<select><option>Video Depth Anything Base</option><option>Video Depth Anything Small</option></select></label><div class="compact-grid"><label>输入尺寸<select><option>322 · 推荐</option><option>518 · 高质量</option></select></label><label>输出格式<select><option>MP4 · H.264</option></select></label></div></div>
+            <div class="compact-setting"><span class="eyebrow">MODEL</span><label>深度模型<select data-field="model"><option>Video Depth Anything Base</option><option>Video Depth Anything Small</option></select></label><div class="compact-grid"><label>输入尺寸<select data-field="size"><option>322 · 推荐</option><option>518 · 高质量</option></select></label><label>提取模式<select data-field="mode"><option value="person">人物模式 · 自动分割</option><option value="professional" selected>专业模式 · 全部深度</option></select></label></div><small data-mode-note>专业模式会提取整幅画面的全部深度</small></div>
             <div class="compact-setting"><span class="eyebrow">DESTINATION</span><label>输出位置<button class="path" data-action="path" type="button"><span data-path>E:\输出\深度视频</span><b>浏览</b></button></label><small>保留原视频规格 · 每个视频独立输出</small></div>
             <div class="compact-model-status"><span class="model-icon">↓</span><div><span>模型按需下载</span><strong>首次开始时从魔塔下载</strong><small>约 458 MB · SHA-256 校验</small></div><button class="link-button" type="button" data-action="model">模型状态</button></div>
           </section>

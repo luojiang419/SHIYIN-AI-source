@@ -1,4 +1,8 @@
-param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Model)
+param(
+    [Parameter(Mandatory=$true)][string]$Root,
+    [Parameter(Mandatory=$true)][string]$Model,
+    [ValidateSet('person','professional')][string]$Mode = 'professional'
+)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
 # Rust canonicalize uses extended-length paths; Windows PowerShell 5.1's
@@ -118,4 +122,9 @@ $models = Get-Content -LiteralPath (Join-Path $Root 'model-download-manifest.jso
 $modelId = if ($Model -eq 'vda_small_fp16_relative') { 'vda-small-model' } elseif ($Model -eq 'vda_base_fp16_relative') { 'vda-base-model' } else { throw 'Unsupported model' }
 $package = $models.packages | Where-Object id -EQ $modelId
 Get-Verified $package (Join-Path $Root ('runtime/' + $package.target_path))
+if ($Mode -eq 'person') {
+    $personPackage = $models.packages | Where-Object id -EQ 'person-mask-model'
+    if (!$personPackage) { throw 'Person mask model is missing from manifest' }
+    Get-Verified $personPackage (Join-Path $Root ('runtime/' + $personPackage.target_path))
+}
 Write-Output 'Runtime and model ready.'

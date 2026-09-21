@@ -42,6 +42,7 @@ struct InferenceRequest {
     input_path: String,
     output_root: String,
     model: String,
+    extraction_mode: String,
     input_size: u32,
     target_fps: f64,
     max_frames: i32,
@@ -317,9 +318,17 @@ async fn get_runtime_status(state: State<'_, LabState>) -> Result<Value, String>
 }
 
 #[tauri::command]
-async fn ensure_components(app: AppHandle, state: State<'_, LabState>, model: String) -> Result<(), String> {
+async fn ensure_components(
+    app: AppHandle,
+    state: State<'_, LabState>,
+    model: String,
+    extraction_mode: String,
+) -> Result<(), String> {
     if !matches!(model.as_str(), "vda_base_fp16_relative" | "vda_small_fp16_relative") {
         return Err("不支持的模型".into());
+    }
+    if !matches!(extraction_mode.as_str(), "person" | "professional") {
+        return Err("不支持的提取模式".into());
     }
     let snapshot = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -328,6 +337,7 @@ async fn ensure_components(app: AppHandle, state: State<'_, LabState>, model: St
         command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(snapshot.root.join("scripts/prepare-components.ps1"))
             .arg("-Root").arg(&snapshot.root).arg("-Model").arg(model)
+            .arg("-Mode").arg(extraction_mode)
             .env_remove("PSModulePath")
             .stdout(Stdio::piped()).stderr(Stdio::piped());
         let _ = fs::create_dir_all(snapshot.root.join("runtime"));
@@ -422,6 +432,9 @@ async fn run_inference(
         if request.max_resolution != -1 && !(256..=8192).contains(&request.max_resolution) {
             return Err("输出最长边必须为 -1（原始分辨率）或位于 256–8192".to_string());
         }
+        if !matches!(request.extraction_mode.as_str(), "person" | "professional") {
+            return Err("提取模式必须是人物模式或专业模式".to_string());
+        }
         let base = if request.output_root.trim().is_empty() {
             snapshot.root.join("runtime/outputs")
         } else {
@@ -433,6 +446,8 @@ async fn run_inference(
             "infer".to_string(),
             "--model".to_string(),
             request.model,
+            "--extraction-mode".to_string(),
+            request.extraction_mode,
             "--input".to_string(),
             request.input_path,
             "--output-dir".to_string(),

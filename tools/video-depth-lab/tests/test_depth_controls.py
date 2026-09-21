@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from worker.depth_controls import DepthControls, apply_depth_controls, normalize_relative_depth
 from worker.models import MODEL_PROFILES, get_profile
-from worker.main import _scaled_size
+from worker.main import _scaled_size, apply_person_masks
 
 
 class DepthControlTests(unittest.TestCase):
@@ -31,6 +31,18 @@ class DepthControlTests(unittest.TestCase):
     def test_rejects_invalid_black_white_points(self):
         with self.assertRaises(ValueError):
             DepthControls(far_point=90, near_point=80).validate()
+
+    def test_person_mode_normalizes_foreground_and_keeps_background_black(self):
+        values = np.array([[[0.0, 1.0], [50.0, 100.0]]], dtype=np.float32)
+        mask = np.array([[[False, True], [True, False]]])
+        normalized, metadata = normalize_relative_depth(values, mask)
+        self.assertLess(metadata["p02"], metadata["p98"])
+        rendered = apply_person_masks(
+            apply_depth_controls(normalized, DepthControls(invert=True)),
+            mask.astype(np.uint8) * 255,
+        )
+        self.assertEqual(int(rendered[0, 0, 0]), 0)
+        self.assertEqual(int(rendered[0, 1, 1]), 0)
 
     def test_model_registry_matches_requested_profiles(self):
         gem = get_profile("gemdepth_vda_8f")

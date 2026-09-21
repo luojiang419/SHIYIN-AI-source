@@ -38,11 +38,37 @@ test('批量界面串行调用真实命令、保留参数并隔离失败任务',
     const requests = calls.filter(c => c.name === 'run_inference');
     assert.equal(requests.length,2);
     assert.equal(requests[0].args.request.maxFrames,-1);
+    assert.equal(requests[0].args.request.extractionMode,'professional');
     assert.equal(calls.find(c => c.name === 'apply_parameters').args.request.parameters.midtone,12);
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight),true);
     await page.reload();
     assert.equal(await page.locator('.job.done').count(),1);
     assert.deepEqual(errors,[]);
+  } finally { await browser.close(); }
+});
+
+test('人物模式传递到组件准备与推理请求', async () => {
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      window.calls = [];
+      window.__TAURI__ = {event:{listen:async () => () => {}},core:{convertFileSrc:p => p,invoke:async (name,args) => {
+        window.calls.push({name,args});
+        if(name === 'get_runtime_status') return {runtimeReady:true,device:'cpu',models:[]};
+        if(name === 'choose_input_videos') return [{name:'person.mp4',path:'C:/person.mp4'}];
+        if(name === 'choose_output_directory') return 'C:/output';
+        if(name === 'run_inference') return {outputDirectory:'C:/output/person',rawDepthPath:'C:/output/person/raw.npz'};
+      }}};
+    });
+    await page.goto(pathToFileURL(fileURLToPath(new URL('../batch-prototype/index.html',import.meta.url))).href);
+    await page.locator('[data-action=add]').click();
+    await page.locator('[data-field=mode]').selectOption('person');
+    await page.locator('[data-action=start]').click();
+    await page.waitForFunction(() => document.querySelectorAll('.job.done').length === 1);
+    const calls = await page.evaluate(() => window.calls);
+    assert.equal(calls.find(c => c.name === 'ensure_components').args.extractionMode,'person');
+    assert.equal(calls.find(c => c.name === 'run_inference').args.request.extractionMode,'person');
   } finally { await browser.close(); }
 });
 

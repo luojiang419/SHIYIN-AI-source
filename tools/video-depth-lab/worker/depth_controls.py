@@ -55,9 +55,18 @@ class DepthControls:
         return value
 
 
-def normalize_relative_depth(depths: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
+def normalize_relative_depth(
+    depths: np.ndarray,
+    valid_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict[str, float]]:
     values = np.asarray(depths, dtype=np.float32)
-    finite = values[np.isfinite(values)]
+    finite_mask = np.isfinite(values)
+    if valid_mask is not None:
+        mask = np.asarray(valid_mask, dtype=bool)
+        if mask.shape != values.shape:
+            raise ValueError("深度与人物掩码尺寸不一致")
+        finite_mask &= mask
+    finite = values[finite_mask]
     if finite.size == 0:
         raise ValueError("模型输出不包含有限深度值")
     low, high = np.percentile(finite, [2.0, 98.0]).astype(float)

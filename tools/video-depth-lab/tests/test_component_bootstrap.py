@@ -40,6 +40,7 @@ class ComponentBootstrapTests(unittest.TestCase):
             (overlays / 'manifest.json').write_text(json.dumps({v:overlay for v in ['cpu', 'cuda126', 'cuda128']}), encoding='utf-8')
             model = root / 'runtime/models/test.pth'
             model.parent.mkdir()
+            person_model = root / 'runtime/models/person-mask/test.onnx'
             model_bytes = b'model fixture' * 10000
             class Handler(BaseHTTPRequestHandler):
                 def log_message(self, *_args):
@@ -56,8 +57,9 @@ class ComponentBootstrapTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             model_entry = {'id':'vda-small-model', 'target_path':'models/test.pth', 'size':len(model_bytes), 'sha256':hashlib.sha256(model_bytes).hexdigest(), 'domestic_url':f'http://127.0.0.1:{server.server_port}/model'}
-            (root / 'model-download-manifest.json').write_text(json.dumps({'message':'中文模型清单', 'packages':[model_entry]}, ensure_ascii=False), encoding='utf-8')
-            command = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-Root', '\\\\?\\' + str(root), '-Model', 'vda_small_fp16_relative']
+            person_entry = {'id':'person-mask-model', 'target_path':'models/person-mask/test.onnx', 'size':len(model_bytes), 'sha256':hashlib.sha256(model_bytes).hexdigest(), 'domestic_url':f'http://127.0.0.1:{server.server_port}/person'}
+            (root / 'model-download-manifest.json').write_text(json.dumps({'message':'中文模型清单', 'packages':[model_entry, person_entry]}, ensure_ascii=False), encoding='utf-8')
+            command = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), '-Root', '\\\\?\\' + str(root), '-Model', 'vda_small_fp16_relative', '-Mode', 'person']
             env = os.environ.copy()
             # Do not import the invoking PowerShell 7 host's modules into 5.1.
             env.pop('PSModulePath', None)
@@ -69,7 +71,9 @@ class ComponentBootstrapTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
             self.assertEqual((root / 'runtime/video-depth-worker/video-depth-worker.exe').read_bytes(), updated)
             self.assertEqual(model.read_bytes(), model_bytes)
+            self.assertEqual(person_model.read_bytes(), model_bytes)
             self.assertIn('Downloading vda-small-model:', result.stdout.decode('utf-8'))
+            self.assertIn('Downloading person-mask-model:', result.stdout.decode('utf-8'))
             self.assertFalse(cache.exists())
 
 

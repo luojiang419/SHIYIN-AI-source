@@ -26,6 +26,8 @@
         kling: {id:'kling', name:'可灵', prefix:'<<<image_', template:'<<<image_{index}>>>={role}', maxImages:12},
         minimax: {id:'minimax', name:'MiniMax H3', prefix:'Picture ', template:'<Picture {index}> is {role}', maxImages:9},
     };
+    const isYouyunH3 = node => node?.apiProvider === 'youyun-h3';
+    const YOUYUN_H3_RESOLUTIONS = ['768P','1080P','2K','4K'];
     const H3_DEFAULT_RESOLUTION = '0.2MP 16:9 - 608x352';
     const H3_RESOLUTION_PRESETS = [
         '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
@@ -46,6 +48,12 @@
         return candidates.find(value=>megapixels && value.startsWith(`${megapixels}MP `)) || candidates[0] || H3_DEFAULT_RESOLUTION;
     }
     function syncH3Dimensions(node, changedField='aspectRatio'){
+        if(isYouyunH3(node)){
+            node.aspectRatio=['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].includes(node.aspectRatio) ? node.aspectRatio : '16:9';
+            node.resolution=YOUYUN_H3_RESOLUTIONS.includes(node.resolution) ? node.resolution : '768P';
+            node.duration=clamp(node.duration || 5,4,30);
+            return node;
+        }
         if(!node) return node;
         if(changedField === 'resolution') node.aspectRatio=h3AspectForResolution(node.resolution) || node.aspectRatio || '16:9';
         else {
@@ -100,11 +108,11 @@
             node.batchCompleted = Math.max(0, Number(node.batchCompleted) || 0);
         } else {
             const h3 = modelRule(node.apiProvider, node.model).id === 'minimax';
-            node.duration = clamp(node.duration || 5, 1, h3 ? 15 : 60);
+            node.duration = clamp(node.duration || 5, isYouyunH3(node) ? 4 : 1, isYouyunH3(node) ? 30 : h3 ? 15 : 60);
             node.aspectRatio = node.aspectRatio || '16:9';
             // H3 使用 MP/像素预设；其他影视模型保留原有 1080P 默认值。
             node.resolution = String(node.resolution || (h3 ? H3_DEFAULT_RESOLUTION : '1080p'));
-            if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;
+            if(h3 && !isYouyunH3(node) && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;
             if(h3) syncH3Dimensions(node,'aspectRatio');
             const rawSteps = Number(node.steps);
             node.steps = h3
@@ -181,6 +189,7 @@
                 : ({storyboard:'分镜图',prompt:'提示词'}[role] || role));
     }
     function modelRule(provider='', model=''){
+        if(provider === 'youyun-h3' || provider === 'minimax-h3') return MODEL_RULES.minimax;
         if(provider === 'linkfox') return {...MODEL_RULES.default,name:'LinkFox'};
         const text = `${provider} ${model}`.toLowerCase();
         if(text.includes('minimax') || text.includes('h3')) return MODEL_RULES.minimax;
@@ -352,7 +361,28 @@
         const value = H3_RESOLUTION_PRESETS.includes(String(selected || '')) ? String(selected) : H3_DEFAULT_RESOLUTION;
         return H3_RESOLUTION_PRESETS.map(item => `<option value="${esc(item)}" ${item === value ? 'selected' : ''}>${esc(item)}</option>`).join('');
     }
+    function youyunH3VideoSettingsHtml(node, providerOptions='', modelOptions=''){
+        return `<div class="film-video-settings film-video-settings-h3">
+            <div class="gen-settings-row film-video-provider-grid"><select class="select-lite" data-film-field="apiProvider">${providerOptions}</select><select class="select-lite" data-film-field="model">${modelOptions}</select></div>
+            <div class="muted-note film-video-h3-note">优云智算H3 参数</div>
+            <div class="gen-settings-row film-video-primary-grid">
+                <label class="field"><div class="setting-title">时长（4–30 秒）</div><input class="setting-input" data-film-field="duration" type="number" min="4" max="30" step="1" value="${Number(node.duration || 5)}"></label>
+                <label class="field"><div class="setting-title">画幅比例</div><select class="select-lite" data-film-field="aspectRatio">${['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].map(value => `<option value="${value}" ${value === (node.aspectRatio || '16:9') ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+                <label class="field"><div class="setting-title">分辨率</div><select class="select-lite" data-film-field="resolution">${YOUYUN_H3_RESOLUTIONS.map(value => `<option value="${value}" ${value === node.resolution ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+            </div>
+            <div class="gen-settings-row film-video-secondary-grid">
+                <div class="field film-video-reference-field"><div class="setting-title">参考能力</div><div class="film-video-field-note">最多 9 图、3 视频、3 音频，素材合计不超过 12 个</div></div>
+            </div>
+            <div class="gen-settings-row film-video-toggle-grid">
+                <button type="button" class="setting-check ${node.multimodal ? 'active' : ''}" data-film-toggle="multimodal"><span class="check-dot"></span>全能参考</button>
+                <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-film-toggle="useFrameRoles"><span class="check-dot"></span>首尾帧模式</button>
+                <button type="button" class="setting-check ${node.muteAudio ? 'active' : ''}" data-film-toggle="muteAudio"><span class="check-dot"></span>移除音轨</button>
+                <button type="button" class="setting-check ${node.watermark ? 'active' : ''}" data-film-toggle="watermark"><span class="check-dot"></span>添加水印</button>
+            </div>
+        </div>`;
+    }
     function h3VideoSettingsHtml(node, providerOptions='', modelOptions=''){
+        if(isYouyunH3(node)) return youyunH3VideoSettingsHtml(node, providerOptions, modelOptions);
         return `<div class="film-video-settings film-video-settings-h3">
             <div class="gen-settings-row film-video-provider-grid"><select class="select-lite" data-film-field="apiProvider">${providerOptions}</select><select class="select-lite" data-film-field="model">${modelOptions}</select></div>
             <div class="muted-note film-video-h3-note">MiniMax H3 参数</div>
@@ -687,7 +717,7 @@
                 const key=control.dataset.filmField;
                 const previousRule = modelRule(node.apiProvider, node.model);
                 node[key]=key==='duration'
-                    ? clamp(control.value,1,modelRule(node.apiProvider,node.model).id === 'minimax' ? 15 : 60)
+                    ? clamp(control.value,isYouyunH3(node) ? 4 : 1,isYouyunH3(node) ? 30 : modelRule(node.apiProvider,node.model).id === 'minimax' ? 15 : 60)
                     : key==='steps' && previousRule.id === 'minimax' ? (Number.isFinite(Number(control.value)) ? Number(control.value) : 12)
                     : key==='steps' ? clamp(control.value,4,30)
                     : key==='storyboardGrain' ? Math.round(Math.max(0,Math.min(10,Number(control.value)||0)))
@@ -703,10 +733,10 @@
                 }
                 const nextRule = modelRule(node.apiProvider, node.model);
                 if(node.type === 'film-video' && nextRule.id === 'minimax'){
-                    node.duration=clamp(node.duration,1,15);
+                    node.duration=clamp(node.duration,isYouyunH3(node) ? 4 : 1,isYouyunH3(node) ? 30 : 15);
                     const h3Steps = Number(node.steps);
                     node.steps=Number.isFinite(h3Steps) ? h3Steps : 12;
-                    if(!H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution=H3_DEFAULT_RESOLUTION;
+                    if(!(isYouyunH3(node) ? YOUYUN_H3_RESOLUTIONS : H3_RESOLUTION_PRESETS).includes(node.resolution)) node.resolution=isYouyunH3(node) ? '768P' : H3_DEFAULT_RESOLUTION;
                     if(key==='resolution') syncH3Dimensions(node,'resolution');
                     else syncH3Dimensions(node,'aspectRatio');
                     if(previousRule.id !== 'minimax'){

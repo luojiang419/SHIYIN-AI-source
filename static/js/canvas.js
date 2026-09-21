@@ -1532,8 +1532,9 @@ function sanitizeVideoNodeProviderModel(node){
     else if(!models.includes(node.model)) node.model = models[0] || '';
     if(isMiniMaxH3VideoNode(node)) applyMiniMaxH3VideoDefaults(node);
 }
+function isYouyunH3VideoNode(node){ return node?.apiProvider === 'youyun-h3'; }
 function isMiniMaxH3VideoNode(node){
-    return Boolean(node && (node.apiProvider === 'minimax-h3' || node.model === 'MiniMax H3'));
+    return Boolean(node && (['minimax-h3','youyun-h3'].includes(node.apiProvider) || (!node.apiProvider && node.model === 'MiniMax H3')));
 }
 function isKlingVideoNode(node){
     return Boolean(node && node.apiProvider === 'kling-cli');
@@ -1630,8 +1631,40 @@ async function loadMiniMaxH3Status({renderAfter=false}={}){
 }
 function minimaxH3ConnectionNote(){
     if(minimaxH3State.loading) return '正在检查 MiniMax H3 服务…';
-    if(minimaxH3State.generationEnabled) return '优云智算 MiniMax H3 已就绪';
-    return minimaxH3State.error || '优云智算 MiniMax H3 不可用，请检查 API 设置。';
+    if(minimaxH3State.generationEnabled) return 'MiniMax H3 本地服务已就绪';
+    return minimaxH3State.error || 'MiniMax H3 本地服务未启动，请联系本机管理员。';
+}
+let youyunH3StatusTask = null;
+let youyunH3State = {loaded:false,loading:false,generationEnabled:false,resolutions:[],defaults:{},error:''};
+async function loadYouyunH3Status({renderAfter=false}={}){
+    // 首屏探测和用户点击生成共享同一 Promise，不能把“加载中”当成最终不可用状态。
+    if(!youyunH3StatusTask){
+        youyunH3State = {...youyunH3State, loading:true};
+        youyunH3StatusTask = (async () => {
+            try {
+                const data = await fetchCanvasJson('/api/youyun-h3/status', {cache:'no-store'});
+                youyunH3State = {
+                    loaded:true,
+                    loading:false,
+                    generationEnabled:Boolean(data.generation_enabled),
+                    resolutions:Array.isArray(data.resolutions) ? data.resolutions : [],
+                    defaults:data.defaults && typeof data.defaults === 'object' ? data.defaults : {},
+                    error:String(data.error || '')
+                };
+            } catch(error) {
+                youyunH3State = {...youyunH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 优云智算H3 状态失败'};
+            }
+            return youyunH3State;
+        })().finally(() => { youyunH3StatusTask = null; });
+    }
+    const state = await youyunH3StatusTask;
+    if(renderAfter) render();
+    return state;
+}
+function youyunH3ConnectionNote(){
+    if(youyunH3State.loading) return '正在检查 优云智算H3 服务…';
+    if(youyunH3State.generationEnabled) return '优云智算H3 已就绪';
+    return youyunH3State.error || '优云智算H3 不可用，请检查 API 设置。';
 }
 function ensureKlingCapabilities(){
     if(klingCliState.loaded || klingCliState.loading) return;
@@ -1817,6 +1850,12 @@ function h3VideoResolutionForAspect(aspectRatio='', resolution=''){
     return candidates.find(value => megapixels && value.startsWith(`${megapixels}MP `)) || candidates[0] || MINIMAX_H3_VIDEO_DEFAULTS.resolution;
 }
 function syncMiniMaxH3VideoDimensions(node, changedField='aspectRatio'){
+    if(isYouyunH3VideoNode(node)){
+        node.aspectRatio = ['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].includes(node.aspectRatio) ? node.aspectRatio : '16:9';
+        node.resolution = ['768P','1080P','2K','4K'].includes(node.resolution) ? node.resolution : '768P';
+        node.duration = Math.max(4, Math.min(30, Number(node.duration) || 5));
+        return node;
+    }
     if(!node) return node;
     if(changedField === 'resolution'){
         node.aspectRatio = h3VideoAspectForResolution(node.resolution) || node.aspectRatio || MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio;
@@ -3122,7 +3161,8 @@ async function loadCanvasConfigCapabilities({isCurrent=() => true, refresh=true,
     const workflowIds = [...new Set(rhNodes.map(node => String(node.workflowId).trim()).filter(Boolean))];
     const tasks = workflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
     // H3 状态也供用户随后新建的节点使用，保留已配置平台的单次后台探测。
-    if(h3Nodes.length || (!visibleOnly && apiProviders.some(provider => provider.id === 'minimax-h3'))) tasks.push(loadMiniMaxH3Status());
+    if(h3Nodes.some(node => !isYouyunH3VideoNode(node)) || (!visibleOnly && apiProviders.some(provider => provider.id === 'minimax-h3'))) tasks.push(loadMiniMaxH3Status());
+    if(h3Nodes.some(isYouyunH3VideoNode) || (!visibleOnly && apiProviders.some(provider => provider.id === 'youyun-h3'))) tasks.push(loadYouyunH3Status());
     await Promise.allSettled(tasks);
     if(!isCurrent() || revision !== canvasConfigRevision) return;
     // 外部能力只影响相应节点，不因配置返回而重建全部媒体、连线和输入框。
@@ -11653,7 +11693,7 @@ async function runFilmNode(nodeId, opts={}){
             const steps = providerId === 'minimax-h3'
                 ? (Number.isFinite(rawSteps) ? rawSteps : 12)
                 : Math.max(4, Math.min(30, Number(node.steps || 12)));
-            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps};
+            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:providerId === 'youyun-h3' && Boolean(node.watermark),mute_audio:providerId === 'youyun-h3' && Boolean(node.muteAudio),camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps};
             const submittedPayload={...api.videoPromptSubmission(node,payload),canvas_id:canvas?.id||'',node_id:node.id};
             const data=providerId==='linkfox'
                 ? await window.CanvasLinkfoxVideo.generate(node,submittedPayload,{onChange:scheduleSave})
@@ -15047,7 +15087,28 @@ function videoModelOptionsForNode(node){
         return `<option value="${escapeHtml(item.model)}" ${item.model === node.model ? 'selected' : ''}>${escapeHtml(label)}</option>`;
     }).join('');
 }
+function youyunH3VideoSettingsHtml(node){
+    return `
+        <div class="muted-note">${escapeHtml(youyunH3ConnectionNote())}</div>
+        <div class="gen-settings-row">
+            <label class="field"><div class="setting-title">${tr('canvas.videoDuration')}</div><input class="setting-input video-duration" type="number" min="4" max="30" step="1" value="${Number(node.duration || MINIMAX_H3_VIDEO_DEFAULTS.duration)}"></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoAspect')}</div><select class="select-lite video-aspect compact-select">
+                ${['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].map(value => `<option value="${value}" ${value === (node.aspectRatio || MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio) ? 'selected' : ''}>${value}</option>`).join('')}
+            </select></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${['768P','1080P','2K','4K'].map(value => `<option value="${value}" ${value === node.resolution ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+        </div>
+        <div class="gen-settings-row">
+            <div class="field"><div class="setting-title">参考能力</div><div class="text-[11px] text-gray-500">最多 9 图、3 视频、3 音频，素材合计不超过 12 个</div></div>
+        </div>
+        <div class="gen-settings-row">
+            <button type="button" class="setting-check ${node.multimodal ? 'active' : ''}" data-video-toggle="multimodal"><span class="check-dot"></span>${tr('canvas.videoMultimodal')}</button>
+            <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-video-toggle="useFrameRoles"><span class="check-dot"></span>${tr('canvas.videoFirstLastFrames')}</button>
+            <button type="button" class="setting-check ${node.muteAudio ? 'active' : ''}" data-video-toggle="muteAudio"><span class="check-dot"></span>移除音轨</button>
+            <button type="button" class="setting-check ${node.watermark ? 'active' : ''}" data-video-toggle="watermark"><span class="check-dot"></span>${tr('canvas.videoWatermark')}</button>
+        </div>`;
+}
 function h3VideoSettingsHtml(node){
+    if(isYouyunH3VideoNode(node)) return youyunH3VideoSettingsHtml(node);
     return `
         <div class="muted-note">${escapeHtml(minimaxH3ConnectionNote())}</div>
         <div class="gen-settings-row">
@@ -15205,7 +15266,7 @@ function renderVideoBody(node){
             if(!models.includes(node.model)) node.model = models[0] || node.model;
         }
         if(isMiniMaxH3VideoNode(node)){
-            node.model = 'MiniMax H3';
+            node.model = isYouyunH3VideoNode(node) ? 'MiniMax-H3' : 'MiniMax H3';
             applyMiniMaxH3VideoDefaults(node, {force:true});
             node.multimodal = true;
             node.useFrameRoles = false;
@@ -15221,8 +15282,8 @@ function renderVideoBody(node){
         scheduleSave();
     };
     if(durationSelect){
-        durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(isH3 ? 15 : 60, Number(e.target.value || 5))); scheduleSave(); };
-        durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(isH3 ? 15 : 60, Number(node.duration || 5)))); };
+        durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(isYouyunH3VideoNode(node) ? 4 : 1, Math.min(isYouyunH3VideoNode(node) ? 30 : isH3 ? 15 : 60, Number(e.target.value || 5))); scheduleSave(); };
+        durationSelect.onblur = e => { e.target.value = String(Math.max(isYouyunH3VideoNode(node) ? 4 : 1, Math.min(isYouyunH3VideoNode(node) ? 30 : isH3 ? 15 : 60, Number(node.duration || 5)))); };
     }
     if(aspectSelect) aspectSelect.onchange = e => {
         e.stopPropagation();
@@ -17129,7 +17190,15 @@ async function runVideoNode(nodeId, opts={}){
     const isH3 = isMiniMaxH3VideoNode(node);
     const isKling = isKlingVideoNode(node);
     if(isKling && !await ensureKlingGenerationAvailable(opts)) return;
-    if(isH3){
+    if(isYouyunH3VideoNode(node)){
+        await loadYouyunH3Status();
+        if(!youyunH3State.generationEnabled){
+            const message = youyunH3ConnectionNote();
+            if(opts.cascade) throw new Error(message);
+            showErrorModal(message, tr('canvas.apiFailed'));
+            return;
+        }
+    } else if(isH3){
         await loadMiniMaxH3Status();
         if(!minimaxH3State.generationEnabled){
             const message = minimaxH3ConnectionNote();
@@ -17193,6 +17262,7 @@ async function runVideoNode(nodeId, opts={}){
             watermark:Boolean(node.watermark),
             camerafixed:Boolean(node.cameraFixed),
             generate_audio:Boolean(node.generateAudio),
+            mute_audio:isYouyunH3VideoNode(node) && Boolean(node.muteAudio),
             multimodal:Boolean(node.multimodal),
             steps:Number(node.steps || 12),
             model_parameters:isKling ? {...(node.modelParameters || {})} : {},

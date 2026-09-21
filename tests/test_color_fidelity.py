@@ -1,6 +1,6 @@
 import numpy as np
 
-from canvas_core.color_fidelity import calibrate_lightness_preview, crop_rgb, inspect_color_fidelity
+from canvas_core.color_fidelity import calibrate_lightness_preview, crop_rgb, inspect_color_fidelity, smart_color_match_preview
 
 
 def test_same_color_is_credible():
@@ -36,3 +36,9 @@ def test_lightness_preview_keeps_chroma_and_reduces_lightness_gap():
     generated = np.full((32, 32, 3), [82, 55, 40], dtype=np.uint8)
     calibrated = calibrate_lightness_preview(reference, generated)
     assert abs(inspect_color_fidelity(reference, calibrated).lightness_offset) < abs(inspect_color_fidelity(reference, generated).lightness_offset)
+
+
+def test_smart_color_match_moves_all_lab_offsets_toward_reference():
+    reference = np.full((32, 32, 3), [140, 96, 68], dtype=np.uint8)
+    generated = np.full((32, 32, 3), [82, 55, 40], dtype=np.uint8)
+    assert inspect_color_fidelity(reference, smart_color_match_preview(reference, generated)).delta_e00_mean < inspect_color_fidelity(reference, generated).delta_e00_mean

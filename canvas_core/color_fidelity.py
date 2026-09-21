@@ -120,3 +120,18 @@ def calibrate_lightness_preview(reference: np.ndarray, generated: np.ndarray, ma
     encoded[..., 0] *= 255.0 / 100.0
     encoded[..., 1:] += 128.0
     return cv2.cvtColor(np.clip(encoded, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
+
+
+def smart_color_match_preview(reference: np.ndarray, generated: np.ndarray, strength: float = .82) -> np.ndarray:
+    """在商品 ROI 内拟合 L/a/b 的均值和对比度，保留原有纹理高频细节。"""
+    ref_lab, source_lab = rgb_to_lab(reference), rgb_to_lab(generated)
+    ref_mean, source_mean = ref_lab.reshape(-1, 3).mean(0), source_lab.reshape(-1, 3).mean(0)
+    ref_std = ref_lab.reshape(-1, 3).std(0).clip(min=3)
+    source_std = source_lab.reshape(-1, 3).std(0).clip(min=3)
+    fitted = (source_lab - source_mean) * (ref_std / source_std) + ref_mean
+    # 色相/饱和度和明度一起受限融合，避免平涂或破坏细密斜纹。
+    fitted = source_lab * (1 - strength) + fitted * strength
+    encoded = fitted.copy()
+    encoded[..., 0] *= 255.0 / 100.0
+    encoded[..., 1:] += 128.0
+    return cv2.cvtColor(np.clip(encoded, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)

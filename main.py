@@ -4355,6 +4355,13 @@ class OnlineImageRequest(BaseModel):
     prompt_context: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ColorFidelityFitRequest(BaseModel):
+    reference_url: str
+    generated_url: str
+    reference_roi: List[int] = Field(min_length=4, max_length=4)
+    generated_roi: List[int] = Field(min_length=4, max_length=4)
+
+
 class PoseReplicateInputs(BaseModel):
     pose_reference: AIReference
     control_map: AIReference
@@ -8153,6 +8160,36 @@ def media_url_from_path(path: str):
         rel = os.path.relpath(absolute, root_abs).replace("\\", "/")
         return f"{prefix}/{urllib.parse.quote(rel, safe='/')}"
     return None
+
+
+@app.post('/api/canvas/color-fidelity-fit')
+async def canvas_color_fidelity_fit(payload: ColorFidelityFitRequest):
+    """智能追色的无损任务：仅替换指定商品 ROI，并保留原始生成文件。"""
+    reference_path = output_file_from_url(payload.reference_url)
+    generated_path = output_file_from_url(payload.generated_url)
+    if not reference_path or not generated_path:
+        raise HTTPException(status_code=404, detail='参考图或生成图不可用')
+    try:
+        import numpy as np
+        from canvas_core.color_fidelity import crop_rgb, inspect_color_fidelity, smart_color_match_preview
+        with Image.open(reference_path) as image:
+            reference = np.asarray(image.convert('RGB'))
+        with Image.open(generated_path) as image:
+            generated = np.asarray(image.convert('RGB'))
+        reference_crop = crop_rgb(reference, payload.reference_roi)
+        generated_crop = crop_rgb(generated, payload.generated_roi)
+        before = inspect_color_fidelity(reference_crop, generated_crop).as_dict()
+        fitted_crop = smart_color_match_preview(reference_crop, generated_crop)
+        x, y, w, h = (int(value) for value in payload.generated_roi)
+        generated[y:y + h, x:x + w] = fitted_crop
+        destination = os.path.join(OUTPUT_OUTPUT_DIR, f'colorfit_{uuid.uuid4().hex}.png')
+        Image.fromarray(generated).save(destination, 'PNG')
+        after = inspect_color_fidelity(reference_crop, fitted_crop).as_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {'original_url': payload.generated_url, 'image_url': media_url_from_path(destination),
+            'reference_roi': payload.reference_roi, 'generated_roi': payload.generated_roi,
+            'before': before, 'after': after, 'passed': after['confidence'].startswith('可信')}
 
 MEDIA_REFERENCE_URL_RE = re.compile(r"(?P<url>/(?:assets/(?:input|output|uploads)|output)/[^\s\"'<>),;]+)")
 MEDIA_FILE_KIND_EXTS = {

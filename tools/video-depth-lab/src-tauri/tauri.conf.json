@@ -33,6 +33,6 @@
   "bundle": {
     "active": false,
     "targets": [],
-    "icon": ["../../depth-map-tuner/src-tauri/icons/icon.ico"]
+    "icon": ["icons/icon.ico"]
   }
 }

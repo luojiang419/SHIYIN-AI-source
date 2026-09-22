@@ -33,6 +33,8 @@ foreach ($file in @('runtime-manifest.json', 'model-download-manifest.json', 'PO
 }
 
 $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
-& $iscc "/DAppVersion=$version" "/DSourceRoot=$stage" "/DOutputRoot=$projectRoot\dist\installer" "$labRoot\installer\SHIYIN-Depth-Batch.iss"
+$iconFile = Join-Path $labRoot 'src-tauri\icons\icon.ico'
+if (-not (Test-Path -LiteralPath $iconFile -PathType Leaf)) { throw "Installer icon not found: $iconFile" }
+& $iscc "/DAppVersion=$version" "/DSourceRoot=$stage" "/DOutputRoot=$projectRoot\dist\installer" "/DIconFile=$iconFile" "$labRoot\installer\SHIYIN-Depth-Batch.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed.' }
 Get-FileHash -LiteralPath (Join-Path $projectRoot "dist\installer\SHIYIN-Depth-Batch-Setup-$version.exe") -Algorithm SHA256

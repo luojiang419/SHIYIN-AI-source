@@ -6,7 +6,7 @@ AppId={{8A9F70CB-3FEC-44C7-8A2A-D895EAB0C445}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=SHIYIN AI
-DefaultDirName={autopf}\SHIYIN-Depth-Batch
+DefaultDirName=D:\Program Files\SHIYIN-Depth-Batch
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir={#OutputRoot}
@@ -14,10 +14,11 @@ OutputBaseFilename=SHIYIN-Depth-Batch-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#AppExeName}
+SetupIconFile={#IconFile}
 
 [Files]
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Excludes: "__pycache__\*"; Flags: ignoreversion recursesubdirs createallsubdirs

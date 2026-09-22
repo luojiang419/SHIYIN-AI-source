@@ -1,14 +1,14 @@
 # SHIYIN-Depth-Batch 安装包与更新发布
 
-状态：1.0.1 安装包已上传魔塔；应用内更新验收待导入分发中心快照。
-下一步：通过分发中心面板导入 `dist/depth-batch-hot-update/20260922093930` 并发布，然后在已安装 1.0.0 客户端点击检查更新。
+状态：1.0.1 品牌图标版安装包已替换发布到魔塔；应用内更新验收待导入分发中心快照。
+下一步：通过分发中心面板导入 `dist/depth-batch-hot-update/20260922101611` 并发布，然后在已安装客户端点击检查更新。
 TODO：
 - [x] 取消便携包构建入口，提供 Windows 安装器
 - [x] 接入签名增量更新与独立更新进程
 - [x] 分发中心按产品隔离深度批量工具更新
 - [x] 创建并接入魔塔 `SHIYIN-Depth-Batch` 仓库
 - [x] 编译、安装包检查和缓存上限检查
-最近验证：1.0.1 Rust `cargo check` 通过；批量界面 Node 测试 5/5 通过；Inno Setup 安装器构建通过；魔塔文件 HEAD 返回 200 且 ETag 与本地 SHA-256 一致。
+最近验证：1.0.1 Rust `cargo check` 通过；批量界面 Node 测试 5/5 通过；Inno Setup 安装器构建通过；EXE 嵌入图标提取核验通过；魔塔旧文件删除后返回 404，新文件上传后 HEAD 返回 200 且 ETag 与本地 SHA-256 一致。
 branch/commit：`feat/video-depth-batch-delivery` / 待提交
 阻塞：无。
 
@@ -30,6 +30,8 @@ branch/commit：`feat/video-depth-batch-delivery` / 待提交
 
 ## 1.0.1 发布
 
-- 安装包：`dist/installer/SHIYIN-Depth-Batch-Setup-1.0.1.exe`，107,221,739 字节，SHA-256 `784f859d8aa26bd78aa6be5bbae52bc90969630550c1602ba43e1d56db6f8b96`。
+- 安装包：`dist/installer/SHIYIN-Depth-Batch-Setup-1.0.1.exe`，107,692,121 字节，SHA-256 `634a66ae6df489b155907b3e743c44fa58c0f4ee4aa077f2ddde5fb5cfda898c`。
 - 魔塔路径：`releases/1.0.1/SHIYIN-Depth-Batch-Setup-1.0.1.exe`，公开 HEAD 校验返回同一 ETag。
-- 应用内更新快照：`dist/depth-batch-hot-update/20260922093930`，更新包 SHA-256 `eb8efb2362c9fab481700577d57f4b9e6ee1a649983be6e7f34527ff30c2e964`。
+- 图标采用用户确认的 `generated-images/20260922-depth-batch-icon-v3/image-00004.jpg`，转换为 16 至 256 像素九档 ICO；应用 EXE、窗口、快捷方式、安装器和卸载项统一使用该图标。
+- 安装器默认目录改为 `D:\Program Files\SHIYIN-Depth-Batch`，写入该目录时请求管理员权限。
+- 应用内更新快照：`dist/depth-batch-hot-update/20260922101611`，包含新图标宿主。

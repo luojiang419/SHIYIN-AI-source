@@ -2081,7 +2081,248 @@
         html.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) #theme-picker-modal {
             background: rgba(23,23,23,.22);
         }
+
+        #shiying-api-key-modal {
+            background:color-mix(in srgb,var(--bg) 36%,transparent);
+            backdrop-filter:blur(18px) saturate(1.08);
+            opacity:1;
+            transition:opacity .24s ease,backdrop-filter .24s ease;
+        }
+        #shiying-api-key-modal.is-closing { opacity:0; backdrop-filter:blur(0); pointer-events:none; }
+        #shiying-api-key-modal .startup-onboarding-panel {
+            position:relative;
+            isolation:isolate;
+            width:min(680px,100%);
+            height:min(640px,calc(100vh - 48px));
+            min-height:min(560px,calc(100vh - 48px));
+            border:1px solid color-mix(in srgb,var(--text) 12%,rgba(255,255,255,.55));
+            background:color-mix(in srgb,var(--sidebar-bg) 72%,transparent) !important;
+            color:var(--text) !important;
+            box-shadow:0 34px 100px color-mix(in srgb,var(--text) 24%,transparent),inset 0 1px 0 rgba(255,255,255,.16);
+            backdrop-filter:blur(30px) saturate(1.24);
+            -webkit-backdrop-filter:blur(30px) saturate(1.24);
+            animation:startup-onboarding-enter .42s var(--fluid-ease);
+        }
+        #shiying-api-key-modal .startup-onboarding-panel::before {
+            content:"";
+            position:absolute;
+            inset:0 0 auto;
+            height:96px;
+            z-index:-1;
+            pointer-events:none;
+            background:linear-gradient(180deg,rgba(255,255,255,.10),transparent);
+        }
+        .startup-onboarding-progress {
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            border-bottom:1px solid var(--border);
+            background:color-mix(in srgb,var(--sidebar-bg) 30%,transparent);
+        }
+        .startup-onboarding-progress.single { grid-template-columns:1fr; }
+        .startup-onboarding-step {
+            position:relative;
+            min-height:66px;
+            padding:0 24px;
+            border:0;
+            background:transparent;
+            color:var(--muted);
+            display:flex;
+            align-items:center;
+            gap:11px;
+            text-align:left;
+        }
+        .startup-onboarding-step + .startup-onboarding-step { border-left:1px solid var(--border); }
+        .startup-onboarding-step::after {
+            content:"";
+            position:absolute;
+            left:0;
+            right:100%;
+            bottom:-1px;
+            height:2px;
+            background:#4e9a7f;
+            transition:right .45s var(--fluid-ease);
+        }
+        .startup-onboarding-step.active,.startup-onboarding-step.complete { color:var(--text); }
+        .startup-onboarding-step.active::after,.startup-onboarding-step.complete::after { right:0; }
+        .startup-onboarding-index {
+            width:27px;
+            height:27px;
+            flex:0 0 27px;
+            border:1px solid var(--border);
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            font-size:12px;
+            font-weight:800;
+        }
+        .startup-onboarding-step.active .startup-onboarding-index,
+        .startup-onboarding-step.complete .startup-onboarding-index {
+            border-color:transparent;
+            color:#d8f4e9;
+            background:rgba(48,123,96,.44);
+        }
+        .startup-onboarding-step-copy { display:flex; flex-direction:column; gap:2px; min-width:0; }
+        .startup-onboarding-step-copy strong { font-size:13px; font-weight:850; }
+        .startup-onboarding-step-copy small { color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .startup-onboarding-pages { position:relative; flex:1; min-height:0; overflow:hidden; }
+        .startup-onboarding-page {
+            position:absolute;
+            inset:0;
+            padding:31px 32px 24px;
+            display:flex;
+            flex-direction:column;
+            overflow-y:auto;
+            overflow-x:hidden;
+            box-sizing:border-box;
+            min-width:0;
+            width:100%;
+            height:100%;
+            opacity:0;
+            transform:translateX(44px);
+            pointer-events:none;
+            transition:opacity .28s ease,transform .48s var(--fluid-ease);
+        }
+        .startup-onboarding-page.active { opacity:1; transform:translateX(0); pointer-events:auto; }
+        .startup-onboarding-page.before { transform:translateX(-44px); }
+        .startup-onboarding-kicker { margin-bottom:7px; color:#4e9a7f; font-size:11px; font-weight:850; }
+        .startup-onboarding-title { margin:0; color:var(--text); font-size:24px; line-height:1.25; font-weight:900; letter-spacing:0; }
+        .startup-onboarding-copy { margin:10px 0 24px; color:var(--muted); font-size:13px; line-height:1.65; }
+        .startup-onboarding-input-row { display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:8px; }
+        #shiying-api-key-modal .shiying-key-input,
+        #shiying-api-key-modal .startup-onboarding-icon-btn {
+            border-color:color-mix(in srgb,var(--text) 13%,transparent);
+            background:color-mix(in srgb,var(--sidebar-bg) 42%,transparent) !important;
+            color:var(--text) !important;
+            backdrop-filter:blur(12px);
+        }
+        .startup-onboarding-icon-btn {
+            min-height:44px;
+            border:1px solid;
+            border-radius:8px;
+            display:grid;
+            place-items:center;
+            font-size:16px;
+        }
+        .startup-onboarding-detected { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+        .startup-onboarding-check {
+            width:42px;
+            height:42px;
+            flex:0 0 42px;
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            background:rgba(48,123,96,.18);
+            color:#61b695;
+            transform:scale(.72);
+            opacity:0;
+        }
+        .startup-onboarding-page.active .startup-onboarding-check { animation:startup-onboarding-check .42s var(--fluid-ease) .16s forwards; }
+        .startup-onboarding-result { border-top:1px solid var(--border); }
+        .startup-onboarding-result-row {
+            display:grid;
+            grid-template-columns:120px minmax(0,1fr);
+            gap:16px;
+            align-items:center;
+            min-height:46px;
+            border-bottom:1px solid var(--border);
+            font-size:13px;
+        }
+        .startup-onboarding-result-label { color:var(--muted); }
+        .startup-onboarding-result-value { min-width:0; overflow-wrap:anywhere; color:var(--text); font-weight:750; }
+        .startup-onboarding-status-dot {
+            display:inline-block;
+            width:7px;
+            height:7px;
+            margin-right:9px;
+            border-radius:50%;
+            background:#61b695;
+            box-shadow:0 0 0 5px rgba(78,154,127,.12);
+        }
+        .startup-onboarding-status-dot.missing { background:#b99a61; box-shadow:0 0 0 5px rgba(185,154,97,.12); }
+        .startup-save-options {
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:10px;
+        }
+        .startup-save-option {
+            min-height:104px;
+            padding:16px;
+            border:1px solid color-mix(in srgb,var(--text) 13%,transparent);
+            border-radius:8px;
+            background:color-mix(in srgb,var(--sidebar-bg) 38%,transparent);
+            color:var(--text);
+            text-align:left;
+            display:flex;
+            flex-direction:column;
+            gap:7px;
+            backdrop-filter:blur(12px);
+            transition:border-color .18s ease,background-color .18s ease,transform .18s ease,box-shadow .18s ease;
+        }
+        .startup-save-option:hover { transform:translateY(-1px); border-color:color-mix(in srgb,#4e9a7f 58%,var(--border)); }
+        .startup-save-option.selected {
+            border-color:#4e9a7f;
+            background:rgba(78,154,127,.13);
+            box-shadow:0 0 0 2px rgba(78,154,127,.12);
+        }
+        .startup-save-option-head { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:14px; font-weight:900; }
+        .startup-save-option-mark {
+            width:19px;
+            height:19px;
+            border:1px solid var(--border);
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            color:transparent;
+            font-size:11px;
+        }
+        .startup-save-option.selected .startup-save-option-mark { border-color:#4e9a7f; background:#4e9a7f; color:#fff; }
+        .startup-save-option-copy { color:var(--muted); font-size:12px; line-height:1.55; }
+        .startup-save-explanation {
+            margin-top:14px;
+            min-height:92px;
+            padding:14px 0;
+            border-top:1px solid var(--border);
+            border-bottom:1px solid var(--border);
+            color:var(--muted);
+            font-size:13px;
+            line-height:1.65;
+        }
+        .startup-save-explanation strong { display:block; margin-bottom:4px; color:var(--text); font-size:13px; }
+        .startup-save-settings-note { display:block; margin-top:6px; color:#4e9a7f; font-size:12px; }
+        .startup-onboarding-actions { margin-top:auto; padding-top:24px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+        #shiying-api-key-modal .studio-modal-btn {
+            min-height:40px;
+            background:color-mix(in srgb,var(--sidebar-bg) 40%,transparent) !important;
+            border-color:color-mix(in srgb,var(--text) 13%,transparent) !important;
+            color:var(--text) !important;
+            backdrop-filter:blur(12px);
+        }
+        #shiying-api-key-modal .studio-modal-btn.primary {
+            background:var(--text) !important;
+            border-color:var(--text) !important;
+            color:var(--bg) !important;
+        }
+        #shiying-api-key-modal .shiying-key-label { color:var(--text); }
+        #shiying-api-key-modal .shiying-key-status { color:var(--muted); }
+        #shiying-api-key-modal .shiying-key-status.error { color:#dc6b63; }
+        @keyframes startup-onboarding-enter { from { opacity:0; transform:translateY(14px) scale(.985); } to { opacity:1; transform:none; } }
+        @keyframes startup-onboarding-check { to { opacity:1; transform:scale(1); } }
+        @media (max-width:700px) {
+            #shiying-api-key-modal { padding:14px; align-items:flex-start; }
+            #shiying-api-key-modal .startup-onboarding-panel { height:calc(100vh - 28px); min-height:0; }
+            .startup-onboarding-step { padding:0 14px; }
+            .startup-onboarding-step-copy small { display:none; }
+            .startup-onboarding-page { padding:26px 22px 20px; }
+            .startup-onboarding-result-row { grid-template-columns:1fr; gap:4px; padding:9px 0; }
+            .startup-save-options { grid-template-columns:1fr; }
+            .startup-onboarding-actions { flex-wrap:wrap; }
+        }
+        @media (prefers-reduced-motion:reduce) {
+            #shiying-api-key-modal,.startup-onboarding-panel,.startup-onboarding-page,.startup-onboarding-step::after,.startup-onboarding-check { animation:none !important; transition:none !important; }
+            .startup-onboarding-page.active,.startup-onboarding-check { opacity:1; transform:none; }
+        }
     </style>
+<link rel="stylesheet" href="/static/css/startup-onboarding.css?v=4">
 </head>
 
 <body>
@@ -2382,35 +2623,89 @@
         </div>
     </div>
 
-    <div id="shiying-api-key-modal" class="studio-modal" hidden>
-        <div class="studio-modal-panel" role="dialog" aria-modal="true" aria-labelledby="shiying-api-key-title">
-            <div class="studio-modal-head">
-                <div>
-                    <div class="studio-modal-kicker">SHIYING API</div>
-                    <h2 id="shiying-api-key-title" class="studio-modal-title">填写 shiying 平台 API Key</h2>
-                </div>
-                <button class="studio-modal-close" type="button" onclick="dismissShiyingApiKeyModal()" title="稍后设置" aria-label="稍后设置">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
+    <div id="shiying-api-key-modal" class="onboarding-shell studio-modal" hidden>
+        <div class="studio-modal-panel startup-onboarding-panel" role="dialog" aria-modal="true" aria-labelledby="startup-onboarding-title">
+            <div id="startupOnboardingProgress" class="startup-onboarding-progress" aria-label="首次启动配置进度">
+                <div id="startupAccountStep" class="startup-onboarding-step complete"><span class="startup-onboarding-index">1</span><span class="startup-onboarding-step-copy"><strong>账号设置</strong><small>已登录</small></span></div>
+                <button id="startupImageStep" class="startup-onboarding-step" type="button" onclick="goToStartupOnboardingStep('image')">
+                    <span class="startup-onboarding-index">2</span>
+                    <span class="startup-onboarding-step-copy"><strong>图片生成</strong><small>填写生成平台 API Key</small></span>
+                </button>
+                <button id="startupAssistantStep" class="startup-onboarding-step" type="button" onclick="goToStartupOnboardingStep('assistant')">
+                    <span class="startup-onboarding-index">3</span>
+                    <span class="startup-onboarding-step-copy"><strong>AI助手</strong><small>确认自动读取结果</small></span>
+                </button>
+                <button id="startupSaveStep" class="startup-onboarding-step" type="button" onclick="goToStartupOnboardingStep('save')">
+                    <span class="startup-onboarding-index">4</span>
+                    <span class="startup-onboarding-step-copy"><strong>保存方式</strong><small>选择下载文件的保存流程</small></span>
                 </button>
             </div>
-            <div class="studio-modal-body">
-                <p class="studio-modal-copy">首次使用全能模式和自由换衣前，需要先填写 shiying 平台 API Key。保存后会立即生效，不需要重启软件。</p>
-                <div class="shiying-key-form">
-                    <label class="shiying-key-label" for="shiyingApiKeyInput">API Key</label>
-                    <input id="shiyingApiKeyInput" class="shiying-key-input" type="password" autocomplete="off" placeholder="粘贴 shiying API Key">
-                    <p id="shiyingApiKeyStatus" class="shiying-key-status" role="status"></p>
-                </div>
-            </div>
-            <div class="studio-modal-actions">
-                <button class="studio-modal-btn" type="button" onclick="dismissShiyingApiKeyModal()">
-                    <span>稍后设置</span>
-                </button>
-                <button id="shiyingApiKeySaveBtn" class="studio-modal-btn primary" type="button" onclick="saveShiyingApiKeyFromModal()">
-                    <span>保存并开始使用</span>
-                </button>
+            <div class="startup-onboarding-pages">
+                <section id="startupImagePage" class="startup-onboarding-page" aria-labelledby="startup-onboarding-title">
+                    <div class="startup-onboarding-kicker">第 2 步，共 4 步</div>
+                    <h2 id="startup-onboarding-title" class="startup-onboarding-title">先连接图片生成服务</h2>
+                    <p class="startup-onboarding-copy">输入 shiying 平台 API Key，用于图片生成与编辑。密钥将保存在本机安全存储中。</p>
+                    <div class="shiying-key-form">
+                        <label class="shiying-key-label" for="shiyingApiKeyInput">图片生成 API Key</label>
+                        <div class="startup-onboarding-input-row">
+                            <input id="shiyingApiKeyInput" class="shiying-key-input" type="password" autocomplete="off" placeholder="粘贴 shiying API Key">
+                            <button class="startup-onboarding-icon-btn" type="button" onclick="toggleStartupImageKey()" title="显示或隐藏 API Key" aria-label="显示或隐藏 API Key">◎</button>
+                        </div>
+                        <p id="shiyingApiKeyStatus" class="shiying-key-status" role="status">保存后立即生效，无需重启软件。</p>
+                    </div>
+                    <div class="startup-onboarding-actions">
+                        <button class="studio-modal-btn" type="button" onclick="dismissShiyingApiKeyModal()">稍后设置</button>
+                        <button id="shiyingApiKeySaveBtn" class="studio-modal-btn primary" type="button" onclick="saveShiyingApiKeyFromModal()">保存并继续　→</button>
+                    </div>
+                </section>
+                <section id="startupAssistantPage" class="startup-onboarding-page" aria-labelledby="startup-assistant-title">
+                    <div class="startup-onboarding-kicker">第 3 步，共 4 步</div>
+                    <div class="startup-onboarding-detected">
+                        <div class="startup-onboarding-check" aria-hidden="true">✓</div>
+                        <div>
+                            <h2 id="startup-assistant-title" class="startup-onboarding-title">已找到可用的 AI助手配置</h2>
+                            <p id="startupAssistantCopy" class="startup-onboarding-copy" style="margin:5px 0 0">配置来自本机 CC Switch，请确认后进入软件。</p>
+                        </div>
+                    </div>
+                    <div class="startup-onboarding-result">
+                        <div class="startup-onboarding-result-row"><span class="startup-onboarding-result-label">检测状态</span><span id="startupAssistantStatus" class="startup-onboarding-result-value"><span class="startup-onboarding-status-dot"></span>读取成功</span></div>
+                        <div class="startup-onboarding-result-row"><span class="startup-onboarding-result-label">供应商</span><span id="startupAssistantProvider" class="startup-onboarding-result-value">—</span></div>
+                        <div class="startup-onboarding-result-row"><span class="startup-onboarding-result-label">请求地址</span><span id="startupAssistantBaseUrl" class="startup-onboarding-result-value">—</span></div>
+                        <div class="startup-onboarding-result-row"><span class="startup-onboarding-result-label">API Key</span><span id="startupAssistantKey" class="startup-onboarding-result-value">—</span></div>
+                        <div class="startup-onboarding-result-row"><span class="startup-onboarding-result-label">模型</span><span id="startupAssistantModel" class="startup-onboarding-result-value">gpt-5.6-terra</span></div>
+                        <div class="startup-onboarding-result-row"><span class="startup-onboarding-result-label">协议</span><span id="startupAssistantProtocol" class="startup-onboarding-result-value">Responses API</span></div>
+                    </div>
+                    <p id="startupAssistantImportStatus" class="shiying-key-status" role="status"></p>
+                    <div class="startup-onboarding-actions">
+                        <button id="startupAssistantBackBtn" class="studio-modal-btn" type="button" onclick="goToStartupOnboardingStep('image')">←　返回</button>
+                        <button id="startupAssistantConfirmBtn" class="studio-modal-btn primary" type="button" onclick="confirmStartupAssistantConfig()">确认配置并进入软件　→</button>
+                    </div>
+                </section>
+                <section id="startupSavePage" class="startup-onboarding-page" aria-labelledby="startup-save-title">
+                    <div class="startup-onboarding-kicker">第 4 步，共 4 步</div>
+                    <h2 id="startup-save-title" class="startup-onboarding-title">选择文件保存方式</h2>
+                    <p class="startup-onboarding-copy">设置图片、视频和工程文件的默认下载方式。</p>
+                    <div class="startup-save-options" role="radiogroup" aria-label="文件保存方式">
+                        <button id="startupSilentSaveOption" class="startup-save-option" type="button" role="radio" aria-checked="false" onclick="selectStartupSaveMode('silent')">
+                            <span class="startup-save-option-head"><span>快捷保存</span><span class="startup-save-option-mark">✓</span></span>
+                            <span class="startup-save-option-copy">选择一个专属目录，之后下载时直接静默保存。</span>
+                        </button>
+                        <button id="startupManualSaveOption" class="startup-save-option" type="button" role="radio" aria-checked="false" onclick="selectStartupSaveMode('manual')">
+                            <span class="startup-save-option-head"><span>手动保存</span><span class="startup-save-option-mark">✓</span></span>
+                            <span class="startup-save-option-copy">每次下载都打开系统窗口，自行选择文件名和保存位置。</span>
+                        </button>
+                    </div>
+                    <div id="startupSaveExplanation" class="startup-save-explanation" aria-live="polite">
+                        <strong>请选择一种保存方式</strong>
+                        选择后会在这里显示对应模式的使用说明。
+                        <span class="startup-save-settings-note">后续可在“软件设置 → 快捷保存”中随时切换。</span>
+                    </div>
+                    <p id="startupSaveStatus" class="shiying-key-status" role="status"></p>
+                    <div class="startup-onboarding-actions">
+                        <button id="startupSaveBackBtn" class="studio-modal-btn" type="button" onclick="goBackFromStartupSave()">←　返回</button>
+                        <button id="startupSaveConfirmBtn" class="studio-modal-btn primary" type="button" onclick="confirmStartupSaveMode()" disabled>请选择保存方式</button>
+                    </div>
+                </section>
             </div>
         </div>
     </div>
@@ -2436,6 +2731,16 @@
         let updateSource = localStorage.getItem('studio_update_source') || 'github';
         let projectUpdateNotes = null;
         let shiyingApiKeyProviders = [];
+        let startupOnboardingState = {
+            imageStepVisible:false,
+            imageRequired:false,
+            assistantStatus:'configured',
+            assistantCompleted:false,
+            candidate:null,
+            saveStatus:'configured',
+            saveChoice:'',
+            step:'image',
+        };
 
         function shiyingProviderFallback() {
             return {
@@ -2465,6 +2770,8 @@
                 name:item.name || item.id,
                 base_url:item.base_url || '',
                 protocol:item.protocol || 'openai',
+                request_protocol:item.request_protocol || '',
+                responses_endpoint:item.responses_endpoint || '',
                 image_request_mode:item.image_request_mode || 'openai',
                 image_generation_endpoint:item.image_generation_endpoint || '',
                 image_edit_endpoint:item.image_edit_endpoint || '',
@@ -2491,32 +2798,154 @@
             status.classList.toggle('error', isError);
         }
 
-        function showShiyingApiKeyModal(providers) {
+        function toggleStartupImageKey() {
+            const input = document.getElementById('shiyingApiKeyInput');
+            if(input) input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function setStartupAssistantImportStatus(message, isError = false) {
+            const status = document.getElementById('startupAssistantImportStatus');
+            if(!status) return;
+            status.textContent = message || '';
+            status.classList.toggle('error', isError);
+        }
+
+        function renderStartupOnboarding() {
+            const state = startupOnboardingState;
+            const progress = document.getElementById('startupOnboardingProgress');
+            const imageStep = document.getElementById('startupImageStep');
+            const assistantStep = document.getElementById('startupAssistantStep');
+            const saveStep = document.getElementById('startupSaveStep');
+            const imagePage = document.getElementById('startupImagePage');
+            const assistantPage = document.getElementById('startupAssistantPage');
+            const savePage = document.getElementById('startupSavePage');
+            const assistantRequired = state.assistantStatus !== 'configured';
+            const saveRequired = state.saveStatus !== 'configured';
+            if(!progress || !imageStep || !assistantStep || !saveStep || !imagePage || !assistantPage || !savePage) return;
+            imageStep.hidden = false;
+            imageStep.disabled = !state.imageStepVisible;
+            assistantStep.hidden = false;
+            saveStep.hidden = false;
+            assistantStep.disabled = state.imageRequired;
+            saveStep.disabled = state.imageRequired || (assistantRequired && !state.assistantCompleted);
+            const visibleCount = [state.imageStepVisible, assistantRequired, saveRequired].filter(Boolean).length;
+            progress.style.gridTemplateColumns = `repeat(${Math.max(visibleCount, 1)}, minmax(0, 1fr))`;
+            imageStep.classList.toggle('active', state.step === 'image');
+            imageStep.classList.toggle('complete', state.imageStepVisible && !state.imageRequired && state.step !== 'image');
+            assistantStep.classList.toggle('active', state.step === 'assistant');
+            assistantStep.classList.toggle('complete', assistantRequired && state.assistantCompleted && state.step !== 'assistant');
+            saveStep.classList.toggle('active', state.step === 'save');
+            imagePage.classList.toggle('active', state.step === 'image');
+            imagePage.classList.toggle('before', state.step !== 'image');
+            assistantPage.classList.toggle('active', state.step === 'assistant');
+            assistantPage.classList.toggle('before', state.step === 'save');
+            savePage.classList.toggle('active', state.step === 'save');
+            const candidate = state.candidate;
+            const detected = state.assistantStatus === 'detected' && candidate;
+            document.getElementById('startupAssistantProvider').textContent = detected ? candidate.provider_name : '未找到';
+            document.getElementById('startupAssistantBaseUrl').textContent = detected ? candidate.base_url : '—';
+            document.getElementById('startupAssistantKey').textContent = detected ? candidate.key_preview : '—';
+            document.getElementById('startupAssistantModel').textContent = detected ? candidate.model : 'gpt-5.6-terra';
+            document.getElementById('startupAssistantProtocol').textContent = detected ? candidate.protocol_label : 'Responses API';
+            const status = document.getElementById('startupAssistantStatus');
+            status.innerHTML = `<span class="startup-onboarding-status-dot${detected ? '' : ' missing'}"></span>${detected ? '读取成功' : '未读取到可用配置'}`;
+            const title = document.getElementById('startup-assistant-title');
+            const copy = document.getElementById('startupAssistantCopy');
+            const confirm = document.getElementById('startupAssistantConfirmBtn');
+            const back = document.getElementById('startupAssistantBackBtn');
+            title.textContent = detected ? '已找到可用的 AI助手配置' : '暂未找到 AI助手配置';
+            copy.textContent = detected ? '配置来自本机 CC Switch，请确认后进入软件。' : '没有发现当前可用的 CC Switch 时颖 Codex 配置，可以稍后在 API 设置中配置。';
+            confirm.textContent = detected
+                ? (saveRequired ? '确认配置并继续　→' : '确认配置并进入软件　→')
+                : (saveRequired ? '暂不配置，继续　→' : '暂不配置，进入软件　→');
+            back.hidden = !state.imageStepVisible;
+
+            const silentOption = document.getElementById('startupSilentSaveOption');
+            const manualOption = document.getElementById('startupManualSaveOption');
+            const saveConfirm = document.getElementById('startupSaveConfirmBtn');
+            const saveBack = document.getElementById('startupSaveBackBtn');
+            silentOption.classList.toggle('selected', state.saveChoice === 'silent');
+            manualOption.classList.toggle('selected', state.saveChoice === 'manual');
+            silentOption.setAttribute('aria-checked', state.saveChoice === 'silent' ? 'true' : 'false');
+            manualOption.setAttribute('aria-checked', state.saveChoice === 'manual' ? 'true' : 'false');
+            saveConfirm.disabled = !state.saveChoice;
+            saveBack.hidden = !state.imageStepVisible && !assistantRequired;
+            saveConfirm.textContent = state.saveChoice === 'silent'
+                ? '选择目录并启用　→'
+                : state.saveChoice === 'manual'
+                    ? '确认手动保存并进入软件　→'
+                    : '请选择保存方式';
+        }
+
+        function goToStartupOnboardingStep(step) {
+            const assistantRequired = startupOnboardingState.assistantStatus !== 'configured';
+            const saveRequired = startupOnboardingState.saveStatus !== 'configured';
+            if(step === 'image' && !startupOnboardingState.imageStepVisible) return;
+            if(step === 'assistant' && (!assistantRequired || startupOnboardingState.imageRequired)) return;
+            if(step === 'save' && (!saveRequired || startupOnboardingState.imageRequired || (assistantRequired && !startupOnboardingState.assistantCompleted))) return;
+            startupOnboardingState.step = step;
+            setStartupAssistantImportStatus('');
+            renderStartupOnboarding();
+        }
+
+        function showShiyingApiKeyModal(providers, assistantState, saveState) {
             shiyingApiKeyProviders = Array.isArray(providers) ? providers : [];
             const modal = document.getElementById('shiying-api-key-modal');
             const input = document.getElementById('shiyingApiKeyInput');
             if(!modal || !input) return;
-            setShiyingApiKeyStatus('');
+            const shiying = shiyingApiKeyProviders.find(item => item.id === 'shiying');
+            const imageRequired = !shiying?.has_key;
+            const assistantStatus = assistantState?.status || 'not_found';
+            const saveStatus = saveState?.status || 'pending';
+            startupOnboardingState = {
+                imageStepVisible:imageRequired,
+                imageRequired,
+                assistantStatus,
+                assistantCompleted:false,
+                candidate:assistantState?.candidate || null,
+                saveStatus,
+                saveChoice:'',
+                step:imageRequired ? 'image' : assistantStatus !== 'configured' ? 'assistant' : 'save',
+            };
+            setShiyingApiKeyStatus('保存后立即生效，无需重启软件。');
+            setStartupAssistantImportStatus('');
+            modal.classList.remove('is-closing');
             modal.hidden = false;
-            setTimeout(() => input.focus(), 60);
+            renderStartupOnboarding();
+            if(startupOnboardingState.step === 'image') setTimeout(() => input.focus(), 80);
         }
 
         function dismissShiyingApiKeyModal() {
             const modal = document.getElementById('shiying-api-key-modal');
-            if(modal) modal.hidden = true;
+            if(!modal || modal.hidden) return;
+            modal.classList.add('is-closing');
+            setTimeout(() => {
+                modal.hidden = true;
+                modal.classList.remove('is-closing');
+            }, 240);
         }
 
         async function ensureShiyingApiKeyOnboarding() {
             try {
-                const response = await fetch('/api/providers', {cache:'no-store'});
-                const data = await response.json();
-                if(!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+                const [providerResponse, assistantResponse, saveResponse] = await Promise.all([
+                    fetch('/api/providers', {cache:'no-store'}),
+                    fetch('/api/onboarding/ai-assistant', {cache:'no-store'}),
+                    fetch('/api/onboarding/save-mode', {cache:'no-store'}),
+                ]);
+                const data = await providerResponse.json();
+                if(!providerResponse.ok) throw new Error(data.detail || `HTTP ${providerResponse.status}`);
+                const assistant = await assistantResponse.json().catch(() => ({status:'not_found', candidate:null}));
+                if(!assistantResponse.ok) throw new Error(assistant.detail || `HTTP ${assistantResponse.status}`);
+                const saveState = await saveResponse.json().catch(() => ({status:'configured'}));
+                if(!saveResponse.ok) throw new Error(saveState.detail || `HTTP ${saveResponse.status}`);
                 const providers = Array.isArray(data.providers) ? data.providers : [];
                 const shiying = providers.find(item => item.id === 'shiying');
-                if(shiying?.has_key) return;
-                showShiyingApiKeyModal(providers);
+                if(shiying?.has_key && assistant.status === 'configured' && saveState.status === 'configured') return false;
+                showShiyingApiKeyModal(providers, assistant, saveState);
+                return true;
             } catch(error) {
-                console.warn('检查 shiying API Key 失败', error);
+                console.warn('检查首次启动 API 配置失败', error);
+                return false;
             }
         }
 
@@ -2556,11 +2985,114 @@
                 if(input) input.value = '';
                 setShiyingApiKeyStatus('已保存，可以开始生成。');
                 broadcastStudioApiChange({type:'providers-changed', updated_at:Date.now()});
-                setTimeout(dismissShiyingApiKeyModal, 520);
+                startupOnboardingState.imageRequired = false;
+                if(startupOnboardingState.assistantStatus !== 'configured') {
+                    setTimeout(() => goToStartupOnboardingStep('assistant'), 360);
+                } else if(startupOnboardingState.saveStatus !== 'configured') {
+                    setTimeout(() => goToStartupOnboardingStep('save'), 360);
+                } else {
+                    setTimeout(dismissShiyingApiKeyModal, 420);
+                }
             } catch(error) {
                 setShiyingApiKeyStatus(error.message || '保存失败，请检查 API Key 后重试。', true);
             } finally {
                 if(saveBtn) saveBtn.disabled = false;
+            }
+        }
+
+        async function confirmStartupAssistantConfig() {
+            if(startupOnboardingState.assistantStatus !== 'detected' || !startupOnboardingState.candidate) {
+                startupOnboardingState.assistantCompleted = true;
+                if(startupOnboardingState.saveStatus !== 'configured') goToStartupOnboardingStep('save');
+                else dismissShiyingApiKeyModal();
+                return;
+            }
+            const confirm = document.getElementById('startupAssistantConfirmBtn');
+            if(confirm) confirm.disabled = true;
+            setStartupAssistantImportStatus('正在保存到本机安全存储...');
+            try {
+                const response = await fetch('/api/onboarding/ai-assistant/import-ccswitch', {method:'POST'});
+                const data = await response.json().catch(() => ({}));
+                if(!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+                setStartupAssistantImportStatus(data.imported ? 'AI助手配置已保存。' : '检测到已有 AI助手配置，已保留原配置。');
+                broadcastStudioApiChange({type:'providers-changed', updated_at:Date.now()});
+                startupOnboardingState.assistantCompleted = true;
+                if(startupOnboardingState.saveStatus !== 'configured') {
+                    setTimeout(() => goToStartupOnboardingStep('save'), 420);
+                } else {
+                    setTimeout(dismissShiyingApiKeyModal, 460);
+                }
+            } catch(error) {
+                setStartupAssistantImportStatus(error.message || '自动配置失败，请稍后重试。', true);
+            } finally {
+                if(confirm) confirm.disabled = false;
+            }
+        }
+
+        function selectStartupSaveMode(mode) {
+            if(!['manual','silent'].includes(mode)) return;
+            startupOnboardingState.saveChoice = mode;
+            const explanation = document.getElementById('startupSaveExplanation');
+            explanation.innerHTML = mode === 'silent'
+                ? '<strong>快捷保存</strong>下一步会打开目录选择窗口。选定后，后续下载将直接静默保存到该目录；同名文件会自动编号，不再重复弹窗。<span class="startup-save-settings-note">后续可在“软件设置 → 快捷保存”中随时切换或更换目录。</span>'
+                : '<strong>手动保存</strong>每次下载都会打开系统保存窗口，你可以逐次选择文件名和保存路径。<span class="startup-save-settings-note">后续可在“软件设置 → 快捷保存”中随时切换。</span>';
+            const status = document.getElementById('startupSaveStatus');
+            status.textContent = '';
+            status.classList.remove('error');
+            renderStartupOnboarding();
+        }
+
+        function goBackFromStartupSave() {
+            if(startupOnboardingState.assistantStatus !== 'configured') goToStartupOnboardingStep('assistant');
+            else if(startupOnboardingState.imageStepVisible) goToStartupOnboardingStep('image');
+        }
+
+        function broadcastStartupQuickSaveSettings(mode, directory) {
+            const detail = {mode, directory};
+            try {
+                const channel = new BroadcastChannel('shiyin-quick-save-settings');
+                channel.postMessage(detail);
+                channel.close();
+            } catch(error) {}
+            try { window.postMessage({type:'quick-save-settings:changed', ...detail}, location.origin); } catch(error) {}
+        }
+
+        async function confirmStartupSaveMode() {
+            const mode = startupOnboardingState.saveChoice;
+            if(!mode) return;
+            const confirm = document.getElementById('startupSaveConfirmBtn');
+            const status = document.getElementById('startupSaveStatus');
+            confirm.disabled = true;
+            status.classList.remove('error');
+            try {
+                let directory = '';
+                if(mode === 'silent') {
+                    status.textContent = '请选择后续静默保存文件的目录...';
+                    const selectResponse = await fetch('/api/app-settings/select-quick-save-directory', {method:'POST'});
+                    const selection = await selectResponse.json().catch(() => ({}));
+                    if(!selectResponse.ok) throw new Error(selection.detail || `HTTP ${selectResponse.status}`);
+                    if(!selection.selected || !selection.path) {
+                        status.textContent = '未选择目录，快捷保存尚未启用。';
+                        return;
+                    }
+                    directory = selection.path;
+                }
+                status.textContent = '正在保存设置...';
+                const response = await fetch('/api/onboarding/save-mode', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({mode, directory}),
+                });
+                const data = await response.json().catch(() => ({}));
+                if(!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+                status.textContent = mode === 'silent' ? `快捷保存已启用：${data.directory}` : '手动保存已启用。';
+                broadcastStartupQuickSaveSettings(data.mode, data.directory || '');
+                setTimeout(dismissShiyingApiKeyModal, 520);
+            } catch(error) {
+                status.textContent = error.message || '保存方式设置失败，请重试。';
+                status.classList.add('error');
+            } finally {
+                confirm.disabled = false;
             }
         }
 

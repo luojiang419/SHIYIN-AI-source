@@ -17,9 +17,126 @@
     [hidden]{display:none!important}.intro{margin-top:24px}.intro h2{font-size:19px;margin:0 0 8px}.steps{font-size:12px;margin-top:12px;color:#746b61;line-height:1.8}.steps strong{color:#24211e}.notice{margin-top:12px;padding:12px;border-radius:10px;background:#f3f0ea}
     @media(prefers-color-scheme:dark){:root{color-scheme:dark;color:#eee9e2;background:#171614}body{background:radial-gradient(circle at 50% 12%,#39332d 0,#201d19 48%,#171614 100%)}main{background:rgba(37,34,30,.94);border-color:#524b42}p,.steps{color:#c1b8ac}h1,.intro h2,.steps strong{color:#f5eee6}.tabs,.notice{background:#322e28}.tab{color:#c1b8ac}.tab.active{background:#50473d;color:#fff}label{color:#e4dbcf}input{background:#211e1a;border-color:#645a4d;color:#f5eee6}.note{border-color:#524b42}button.submit{background:#e7ded2;color:#28231d}.error{color:#ff9ba5}.success{color:#91d6a4}}
   </style>
-</head>
-<body>
-  <main>
+<style>/* 与配置引导共用规格；登录前静态资源受鉴权保护，因此内嵌此样式。 */
+         .onboarding-shell {
+            background:color-mix(in srgb,var(--bg) 36%,transparent);
+            backdrop-filter:blur(18px) saturate(1.08);
+            opacity:1;
+            transition:opacity .24s ease,backdrop-filter .24s ease;
+        }
+         .onboarding-shell.is-closing { opacity:0; backdrop-filter:blur(0); pointer-events:none; }
+         .onboarding-shell .startup-onboarding-panel {
+            position:relative;
+            isolation:isolate;
+            width:min(680px,100%);
+            height:min(640px,calc(100vh - 48px));
+            min-height:min(560px,calc(100vh - 48px));
+            border:1px solid color-mix(in srgb,var(--text) 12%,rgba(255,255,255,.55));
+            background:color-mix(in srgb,var(--sidebar-bg) 72%,transparent) !important;
+            color:var(--text) !important;
+            box-shadow:0 34px 100px color-mix(in srgb,var(--text) 24%,transparent),inset 0 1px 0 rgba(255,255,255,.16);
+            backdrop-filter:blur(30px) saturate(1.24);
+            -webkit-backdrop-filter:blur(30px) saturate(1.24);
+            animation:startup-onboarding-enter .42s var(--fluid-ease);
+        }
+         .onboarding-shell .startup-onboarding-panel::before {
+            content:"";
+            position:absolute;
+            inset:0 0 auto;
+            height:96px;
+            z-index:-1;
+            pointer-events:none;
+            background:linear-gradient(180deg,rgba(255,255,255,.10),transparent);
+        }
+        .startup-onboarding-progress {
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            border-bottom:1px solid var(--border);
+            background:color-mix(in srgb,var(--sidebar-bg) 30%,transparent);
+        }
+        .startup-onboarding-progress.single { grid-template-columns:1fr; }
+        .startup-onboarding-step {
+            position:relative;
+            min-height:66px;
+            padding:0 24px;
+            border:0;
+            background:transparent;
+            color:var(--muted);
+            display:flex;
+            align-items:center;
+            gap:11px;
+            text-align:left;
+        }
+        .startup-onboarding-step + .startup-onboarding-step { border-left:1px solid var(--border); }
+        .startup-onboarding-step::after {
+            content:"";
+            position:absolute;
+            left:0;
+            right:100%;
+            bottom:-1px;
+            height:2px;
+            background:#4e9a7f;
+            transition:right .45s var(--fluid-ease);
+        }
+        .startup-onboarding-step.active,.startup-onboarding-step.complete { color:var(--text); }
+        .startup-onboarding-step.active::after,.startup-onboarding-step.complete::after { right:0; }
+        .startup-onboarding-index {
+            width:27px;
+            height:27px;
+            flex:0 0 27px;
+            border:1px solid var(--border);
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            font-size:12px;
+            font-weight:800;
+        }
+        .startup-onboarding-step.active .startup-onboarding-index,
+        .startup-onboarding-step.complete .startup-onboarding-index {
+            border-color:transparent;
+            color:#d8f4e9;
+            background:rgba(48,123,96,.44);
+        }
+        .startup-onboarding-step-copy { display:flex; flex-direction:column; gap:2px; min-width:0; }
+        .startup-onboarding-step-copy strong { font-size:13px; font-weight:850; }
+        .startup-onboarding-step-copy small { color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .startup-onboarding-pages { position:relative; flex:1; min-height:0; overflow:hidden; }
+        .startup-onboarding-page {
+            position:absolute;
+            inset:0;
+            padding:31px 32px 24px;
+            display:flex;
+            flex-direction:column;
+            overflow-y:auto;
+            overflow-x:hidden;
+            box-sizing:border-box;
+            min-width:0;
+            width:100%;
+            height:100%;
+            opacity:0;
+            transform:translateX(44px);
+            pointer-events:none;
+            transition:opacity .28s ease,transform .48s var(--fluid-ease);
+        }
+        .startup-onboarding-page.active { opacity:1; transform:translateX(0); pointer-events:auto; }
+        .startup-onboarding-page.before { transform:translateX(-44px); }
+        .startup-onboarding-kicker { margin-bottom:7px; color:#4e9a7f; font-size:11px; font-weight:850; }
+        .startup-onboarding-title { margin:0; color:var(--text); font-size:24px; line-height:1.25; font-weight:900; letter-spacing:0; }
+        .startup-onboarding-copy { margin:10px 0 24px; color:var(--muted); font-size:13px; line-height:1.65; }
+
+.onboarding-shell .startup-onboarding-progress{grid-template-columns:repeat(4,minmax(0,1fr))!important;flex-shrink:0}
+.onboarding-shell .startup-onboarding-step{padding:0 14px;gap:8px}
+.onboarding-shell .startup-onboarding-panel{display:flex;flex-direction:column;overflow:hidden;border-radius:16px;padding:0}
+@media(max-width:620px){.onboarding-shell .startup-onboarding-step{padding:0 7px;gap:4px}.onboarding-shell .startup-onboarding-step-copy small{display:none}.onboarding-shell .startup-onboarding-step-copy strong{font-size:11px}.onboarding-shell .startup-onboarding-page{padding:22px}}
+</style>
+<style>
+:root{--bg:#f6eee4;--sidebar-bg:#f6eee4;--text:#332d28;--muted:#84766a;--border:rgba(90,72,55,.16);--fluid-ease:cubic-bezier(.22,1,.36,1)}
+body{background:var(--bg)}main{box-shadow:none}.brand,.steps,.note{display:none}.intro{margin:0}.intro h2{font-size:24px}.notice{margin:12px 0 0;padding:0;background:none;font-size:12px}.tabs{margin:18px 0 0;min-height:38px}.tab{padding:8px}label{margin-top:12px}input{height:44px;padding:10px 12px;border-radius:8px}form{padding-top:0;gap:6px;display:flex;flex-direction:column;flex:1}button.submit{margin-top:auto;min-height:44px;border-radius:8px}#message{margin:8px 0 0;font-size:12px}.intro p{margin-top:8px}
+@media(prefers-color-scheme:dark){:root{--bg:#1b1b1b;--sidebar-bg:#252525;--text:#f0eee9;--muted:#aaa49c;--border:rgba(255,255,255,.12)}body{background:var(--bg)}}
+@media(max-height:650px){form{flex:none}button.submit{margin-top:18px}}
+</style></head>
+<body class="onboarding-shell">
+  <main class="startup-onboarding-panel"><div class="startup-onboarding-progress" aria-label="首次启动配置进度"><div class="startup-onboarding-step active"><span class="startup-onboarding-index">1</span><span class="startup-onboarding-step-copy"><strong>账号设置</strong><small>注册或登录</small></span></div><div class="startup-onboarding-step "><span class="startup-onboarding-index">2</span><span class="startup-onboarding-step-copy"><strong>图片生成</strong><small>配置生成服务</small></span></div><div class="startup-onboarding-step "><span class="startup-onboarding-index">3</span><span class="startup-onboarding-step-copy"><strong>AI助手</strong><small>确认助手配置</small></span></div><div class="startup-onboarding-step "><span class="startup-onboarding-index">4</span><span class="startup-onboarding-step-copy"><strong>保存方式</strong><small>选择保存流程</small></span></div></div><div class="startup-onboarding-pages"><section class="startup-onboarding-page active"><div class="startup-onboarding-kicker">第 1 步，共 4 步</div>
     <div class="brand"><div class="mark">S</div><div><h1>SHIYIN AI</h1><p>每个账号拥有独立的画布、素材和生成资源</p></div></div>
     <div class="intro"><h2 id="heading">设置你的账号</h2><p id="description">正在读取账号设置状态…</p></div>
     <div class="steps" id="steps" hidden><strong>① 账号设置</strong> → ② 图片服务 → ③ AI助手 → ④ 保存方式</div>
@@ -33,7 +150,7 @@
     </form>
     <p id="message" aria-live="polite"></p>
     <p class="note" id="note">输入已注册账号和密码，桌面端与 Web 均可登录所有账号；英文字母大小写视为同一账号。</p>
-  </main>
+</section></div>  </main>
   <script>
     let mode='login',setup={needs_setup:false,can_setup:false,persistent_login:false},ready=false;
     const form=document.getElementById('form'),account=document.getElementById('account'),password=document.getElementById('password'),submit=document.getElementById('submit'),message=document.getElementById('message'),note=document.getElementById('note');

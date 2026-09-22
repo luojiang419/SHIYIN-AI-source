@@ -59,17 +59,18 @@
         providers=(await response.json()).api_providers||[];
         draft=structuredClone(await api.read());
         render('image');render('video');
-        const quickResponse=await fetch('/api/personal-preferences/quick-save');
+        const quickResponse=await api.requestSaveSettings();
         if(!quickResponse.ok)throw new Error('无法读取保存设置');
         const quick=await quickResponse.json();
         $('saveMode').value=quick.mode||'manual';$('saveDirectory').value=quick.directory||'';
         $('preferencesFields').disabled=false;$('preferencesForm').setAttribute('aria-busy','false');status('偏好已加载');
+        if(api.legacyBackend) document.querySelector('.preferences-notice').textContent='生成偏好按当前账号保存在本机，应用于整个工作区。保存目录沿用本机软件设置。';
         if(!window.ShiyinQuickSave?.isDesktop()) $('saveHint').textContent='目录设置供桌面客户端使用；浏览器下载位置由浏览器管理。';
     }catch(error){status(error.message,true);return;}
     $('chooseDirectory').onclick=async()=>{
         const button=$('chooseDirectory');button.disabled=true;
         try{
-            const response=await fetch('/api/personal-preferences/select-directory',{method:'POST'});
+            const response=await api.requestSaveSettings('select-directory',{method:'POST'});
             const data=await response.json();if(!response.ok)throw new Error(data.detail||'目录选择失败');
             if(data.selected && data.path){$('saveDirectory').value=data.path;$('saveMode').value='silent';status('目录已选择，保存后生效');}
         }catch(error){status(error.message,true);}finally{button.disabled=false;}

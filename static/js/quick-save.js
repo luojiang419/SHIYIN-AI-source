@@ -2,7 +2,7 @@
     'use strict';
 
     const CHANNEL_NAME = 'shiyin-quick-save-settings';
-    const API_URL = '/api/personal-preferences/quick-save';
+    let API_URL = '/api/personal-preferences/quick-save';
     let state = {mode:'manual', directory:'', loaded:false};
     let toastTimer = 0;
 
@@ -32,7 +32,11 @@
     async function loadSettings(){
         if(!isDesktop()) return applySettings({mode:'manual', directory:''});
         try {
-            const response = await fetch(API_URL, {cache:'no-store'});
+            let response = await fetch(API_URL, {cache:'no-store'});
+            if(response.status === 404){
+                API_URL = '/api/app-settings/quick-save';
+                response = await fetch(API_URL, {cache:'no-store'});
+            }
             if(!response.ok) return applySettings({mode:'manual', directory:''});
             return applySettings(await response.json());
         } catch(error) {

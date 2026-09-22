@@ -1,0 +1,6 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>拾影 · 可灵填充</title>
+<style>body{width:310px;padding:16px;font:14px system-ui;background:#191b21;color:#eee}input,button{box-sizing:border-box;width:100%;padding:9px;margin:7px 0}p{line-height:1.6;color:#ccc}button{cursor:pointer}#status{white-space:pre-wrap}</style>
+<h3>可灵画布助手</h3><p>接收画布发送的图片、视频与提示词。画布点击生成后自动接收、填充并提交，无需手动连接。</p>
+<label>拾影地址<input id="base" placeholder="由画布自动识别本机地址"></label>
+<button id="connect">授权并连接（远程站点首次使用）</button><button id="stop">停止接收</button>
+<p>新版画布会自动交接任务，无需在 Chrome 再登录拾影。请保持可灵已登录。</p><p id="status" role="status"></p><script src="popup.js"></script></html>

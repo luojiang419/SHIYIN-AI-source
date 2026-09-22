@@ -95,9 +95,31 @@ def test_ticket_media_is_limited_to_claimed_task(tmp_path):
     draft = client.post('/api/kling-web/drafts', json={'prompt':'test', 'references':[{'url':'/assets/a.png','kind':'image'}]}).json()
     headers = {'Authorization': 'Bearer ' + draft['ticket']}
     assert client.get('/api/kling-web/transport/media/0', headers=headers).status_code == 403
+
     claimed = client.post('/api/kling-web/transport/claim', headers=headers).json()['draft']
     assert client.get('/api/kling-web/transport/media/0', headers=headers).content == b'fixture'
     assert client.get('/api/kling-web/transport/media/1', headers=headers).status_code == 403
     assert client.get('/api/kling-web/transport/media/0', headers={'Authorization':'Bearer wrong'}).status_code == 401
     client.post('/api/kling-web/transport/result', headers=headers, json={'lease':claimed['lease'],'status':'filled'})
     assert client.get('/api/kling-web/transport/media/0', headers=headers).status_code == 403
+
+
+def test_background_channel_scopes_owner_and_avoids_browser_launch(client, tmp_path, monkeypatch):
+    draft = client.post('/api/kling-web/drafts', json={'prompt':'pair'}).json()
+    ticket_headers = {'Authorization':'Bearer '+draft['ticket']}
+    registered = client.post('/api/kling-web/transport/channel', headers=ticket_headers).json()
+    headers = {'Authorization':'Bearer '+registered['channel']}
+    assert client.post('/api/kling-web/transport/poll').status_code == 401
+    assert client.post('/api/kling-web/transport/poll', headers=headers).json()['ticket'] == draft['ticket']
+    # 连接凭据不能直接读取媒体或取得生成许可。
+    assert client.post('/api/kling-web/transport/claim', headers=headers).status_code == 401
+    executable=tmp_path/'chrome.exe'
+    executable.touch()
+    monkeypatch.setattr('canvas_core.kling_web_bridge.shutil.which', lambda _:str(executable))
+    launches=[]
+    monkeypatch.setattr('canvas_core.kling_web_bridge.subprocess.Popen', lambda *a,**kw:launches.append(a))
+    assert client.post('/api/kling-web/drafts/'+draft['id']+'/open').json()['opened'] is False
+    assert launches == []
+    client.delete('/api/kling-web/drafts/'+draft['id'])
+    client.post('/api/kling-web/drafts', headers={'x-test-account':'two'}, json={'prompt':'other'})
+    assert client.post('/api/kling-web/transport/poll', headers=headers).json()['ticket'] is None

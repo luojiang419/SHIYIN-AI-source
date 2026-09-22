@@ -27,9 +27,11 @@ async function call(tabId, method, args=[]) {
 }
 async function targetTab() {
   const tabs = await chrome.tabs.query({url:'https://klingai.com/app/omni/*'});
-  let tab = tabs.find(t=>t.active) || tabs[0];
-  if (!tab) tab = await chrome.tabs.create({url:KLING_URL});
-  else await chrome.tabs.update(tab.id,{active:true});
+  let tab = tabs.find(t=>!t.active) || tabs[0];
+  if (!tab) {
+    try {tab = await chrome.tabs.create({url:KLING_URL,active:false});}
+    catch {tab = (await chrome.windows.create({url:KLING_URL,focused:false,state:'minimized'})).tabs[0];}
+  }
   const deadline=Date.now()+30000;
   while (Date.now()<deadline) {
     const state=await chrome.tabs.get(tab.id);
@@ -42,7 +44,19 @@ async function targetTab() {
 async function tick() {
   if (active) return;
   active=true;
-  const stored=await chrome.storage.local.get(['enabled','base','pending']);
+  let stored;
+  try {
+    stored=await chrome.storage.local.get(['enabled','base','pending','channels']);
+    if(stored.enabled!==false && !(stored.pending || []).length) {
+      for(const channel of stored.channels || []) {
+        try {
+          const result=await api(channel.base,'/transport/poll',{method:'POST'},channel.token);
+          if(result.ticket) await updatePending(pending=>pending.some(x=>x.ticket===result.ticket)?pending:[...pending,{base:channel.base,ticket:result.ticket}]);
+        } catch { /* 后端重启后由下一次画布交接重建连接，不重放已领取任务。 */ }
+      }
+      stored={...stored,...await chrome.storage.local.get('pending')};
+    }
+  } catch(error) {active=false;throw error;}
   const job=(stored.pending || [])[0];
   const base=job?.base || stored.base;
   const ticket=job?.ticket || '';
@@ -119,6 +133,11 @@ chrome.runtime.onMessage.addListener((msg,sender,respond)=>{
       const source=new URL(sender.url);
       if(!['127.0.0.1','localhost'].includes(source.hostname) || source.protocol!=='http:' || source.pathname!=='/api/kling-web/connect' || !/^[\w-]{40,60}$/.test(msg.ticket)) throw Error('交接来源无效');
       await updatePending(pending=>pending.some(x=>x.ticket===msg.ticket)?pending:[...pending,{base:source.origin,ticket:msg.ticket}]);
+      try {
+        const registered=await api(source.origin,'/transport/channel',{method:'POST'},msg.ticket);
+        const saved=await chrome.storage.local.get('channels');
+        await chrome.storage.local.set({channels:[...(saved.channels || []).filter(x=>x.base!==source.origin),{base:source.origin,token:registered.channel}]});
+      } catch { /* 旧后端仍可使用单任务交接。 */ }
       await chrome.storage.local.set({base:source.origin,enabled:true,lastStatus:'已自动接收画布任务'});
       await chrome.alarms.create('kling-poll',{periodInMinutes:0.5});
       respond({ok:true});

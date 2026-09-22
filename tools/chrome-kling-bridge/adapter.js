@@ -1,6 +1,6 @@
 /* 只使用网页 DOM 与标准输入事件；不读取可灵 cookie、私有接口或框架内部状态。 */
 (() => {
-  if (window.ShiyinKlingAdapter?.version === '0.2.0') return;
+  if (window.ShiyinKlingAdapter?.version === '0.3.0') return;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const visible = el => !!el && el.getClientRects().length > 0;
   function editor() {
@@ -17,11 +17,21 @@
   let busy = false;
   let completed = null;
   function poolSignature() { return cards().map(e=>e.querySelector('img')?.src || '').join('\n'); }
-  function prepare(draft) {
+  async function prepare(draft) {
     if(busy) throw new Error('正在填充另一份草稿');
     const current=editor().innerText;
     const reuse=!!completed && completed.sourceKey===draft.sourceKey && completed.text===current && completed.pool===poolSignature();
-    if(!reuse && (cards().length || current.trim())) throw new Error('当前可灵编辑器已有草稿，请先保存或点击网页“重置”，再重新发送');
+    if(!reuse && (cards().length || current.trim())) {
+      // 用户授权画布任务覆盖当前草稿，通过网页重置同步清理素材和编辑器状态。
+      const reset=unique('.omni-designer__message-input-area .reset-option');
+      reset.click();
+      const deadline=Date.now()+10000;
+      while(cards().length || editor().innerText.trim()) {
+        if(Date.now()>deadline) throw new Error('可灵草稿重置未完成，已停止本次任务');
+        await sleep(200);
+      }
+      completed=null;
+    }
     return {reuse};
   }
   function beginFile(id, name, type) {
@@ -108,7 +118,7 @@
   async function run(draft) {
     if (busy) throw new Error('正在填充另一份草稿');
     if (completed?.id === draft.id) return {status:'filled', generated:false};
-    const {reuse}=prepare(draft);
+    const {reuse}=await prepare(draft);
     busy = true;
     try {
       if(!reuse){
@@ -184,5 +194,5 @@
     }
     return {status:'unknown',message:'已点击生成，但未确认可灵任务回执。请查看可灵历史记录，勿重复提交。'};
   }
-  window.ShiyinKlingAdapter = {version:'0.2.0',beginFile, appendFile, upload, fillText, run, snapshot, prepare,configure,checkSubmit,submit};
+  window.ShiyinKlingAdapter = {version:'0.3.0',beginFile, appendFile, upload, fillText, run, snapshot, prepare,configure,checkSubmit,submit};
 })();

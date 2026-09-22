@@ -2,7 +2,7 @@
     'use strict';
 
     const CHANNEL_NAME = 'shiyin-quick-save-settings';
-    const API_URL = '/api/app-settings/quick-save';
+    const API_URL = '/api/personal-preferences/quick-save';
     let state = {mode:'manual', directory:'', loaded:false};
     let toastTimer = 0;
 

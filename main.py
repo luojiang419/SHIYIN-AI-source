@@ -3190,6 +3190,44 @@ def desktop_bootstrap(request: Request, token: str = ""):
     return RedirectResponse("/login", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
 
 
+def personal_preferences_key():
+    return f"personal_preferences:{current_account_id()}"
+
+
+@app.get("/api/personal-preferences")
+def get_personal_preferences():
+    return DATABASE.get_setting(personal_preferences_key(), {})["value"]
+
+
+@app.put("/api/personal-preferences")
+def save_personal_preferences(payload: Dict[str, Any]):
+    allowed = {"image", "video", "defaultImageProvider", "defaultVideoProvider", "quickSave"}
+    clean = {key: value for key, value in payload.items() if key in allowed}
+    for kind in ("image", "video"):
+        if kind in clean and not isinstance(clean[kind], dict):
+            raise HTTPException(status_code=422, detail="平台偏好格式无效")
+    if "quickSave" in clean:
+        value = clean["quickSave"]
+        if not isinstance(value, dict) or value.get("mode") not in ("silent", "manual"):
+            raise HTTPException(status_code=422, detail="保存方式无效")
+        directory = str(value.get("directory") or "").strip()
+        if value["mode"] == "silent":
+            path = Path(directory).expanduser()
+            if not directory or not path.is_absolute():
+                raise HTTPException(status_code=422, detail="请选择有效的绝对目录")
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                fd, probe = tempfile.mkstemp(prefix=".shiyin-write-test-", dir=str(path))
+                os.close(fd)
+                os.unlink(probe)
+            except OSError as exc:
+                raise HTTPException(status_code=422, detail="目录不可写，请选择其他目录") from exc
+        clean["quickSave"] = {"mode": value["mode"], "directory": directory}
+    current = get_personal_preferences()
+    DATABASE.save_setting(personal_preferences_key(), {**current, **clean})
+    return get_personal_preferences()
+
+
 @app.get("/api/preferences")
 def get_preferences(request: Request):
     identity = request_identity(request)
@@ -3358,8 +3396,12 @@ def person_depth_lan_status(request: Request):
     return distribution_status(str(config.get("person_depth_lan_source") or ""))
 
 
+@app.get("/api/personal-preferences/quick-save")
 @app.get("/api/app-settings/quick-save")
 def get_quick_save_settings():
+    personal = get_personal_preferences().get("quickSave")
+    if isinstance(personal, dict):
+        return personal
     config = read_app_config(APP_PATHS.data_root)
     return {
         "mode": str(config.get("quick_save_mode") or "manual"),
@@ -3368,10 +3410,10 @@ def get_quick_save_settings():
 
 
 def quick_save_configured_directory() -> Path:
-    config = read_app_config(APP_PATHS.data_root)
-    if str(config.get("quick_save_mode") or "manual") != "silent":
+    config = get_quick_save_settings()
+    if config.get("mode") != "silent":
         raise HTTPException(status_code=409, detail="当前未启用静默保存")
-    directory = str(config.get("quick_save_dir") or "").strip()
+    directory = str(config.get("directory") or "").strip()
     if not directory:
         raise HTTPException(status_code=409, detail="尚未选择快捷保存目录")
     path = Path(directory).expanduser()
@@ -3394,6 +3436,7 @@ def quick_save_source(url: str, requested_name: str) -> Tuple[str, str]:
     return source, name
 
 
+@app.post("/api/personal-preferences/quick-save")
 @app.post("/api/app-settings/quick-save")
 async def quick_save_download(
     request: Request,
@@ -3432,7 +3475,7 @@ async def quick_save_download(
                 destination = await asyncio.to_thread(save_stream, directory, filename, write_local)
             else:
                 parsed = urllib.parse.urlsplit(source)
-                if parsed.path == "/api/app-settings/quick-save":
+                if parsed.path in ("/api/app-settings/quick-save", "/api/personal-preferences/quick-save"):
                     raise ValueError("快捷保存地址不能指向自身")
                 if parsed.scheme in ("http", "https"):
                     remote_url = source
@@ -3464,6 +3507,7 @@ async def quick_save_download(
     return {"saved": True, "name": destination.name, "path": str(destination)}
 
 
+@app.post("/api/personal-preferences/select-directory")
 @app.post("/api/app-settings/select-quick-save-directory")
 async def select_quick_save_directory():
     if os.name != "nt":

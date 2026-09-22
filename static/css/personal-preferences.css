@@ -1,0 +1,20 @@
+.preferences-page { width:min(1040px,calc(100% - 56px)); }
+.preferences-notice { margin-top:24px; color:var(--as-muted); font-size:12px; line-height:1.8; padding-left:14px; border-left:2px solid var(--as-line); }
+.preferences-page fieldset { margin:0; padding:0; border:0; min-width:0; }
+.preferences-badge { padding:6px 10px; border:1px solid var(--as-line); border-radius:20px; color:var(--as-muted); font-size:10px; }
+.preferences-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; margin-top:22px; }
+.preferences-grid label { display:flex; flex-direction:column; gap:9px; min-width:0; color:var(--as-soft); font-size:12px; }
+.preferences-page select,.preferences-page input:not([type=checkbox]) { width:100%; min-width:0; height:42px; border:1px solid var(--as-line); border-radius:10px; background:var(--as-control); color:var(--as-text); padding:0 12px; font-size:12px; }
+.preferences-page button { border:1px solid var(--as-line); border-radius:10px; padding:11px 17px; background:var(--as-control); color:var(--as-text); cursor:pointer; white-space:nowrap; }
+.preferences-page :is(input,select,button):focus-visible { outline:2px solid var(--as-muted); outline-offset:3px; }
+.preferences-page button:hover { filter:brightness(1.08); }
+.preferences-grid .preferences-check { flex-direction:row; align-items:center; min-height:30px; }
+.preferences-check input { accent-color:var(--as-muted); }
+.preferences-directory { display:flex; gap:8px; }
+.preferences-footer { position:sticky; bottom:0; display:flex; align-items:center; justify-content:space-between; gap:20px; margin-top:28px; padding:18px 0; background:var(--as-bg); border-top:1px solid var(--as-line); }
+#preferenceStatus { font-size:12px; color:var(--as-success); line-height:1.6; }
+#preferenceStatus.error { color:var(--as-danger); }
+#savePreferences { background:var(--as-text); color:var(--as-bg); padding:12px 24px; }
+.preferences-page :disabled { opacity:.55; cursor:wait; }
+html.studio-theme-pure-white { --as-bg:#fff; --as-panel:#fff; --as-control:#f7f7f7; --as-text:#252525; --as-soft:#555; --as-muted:#777; --as-line:#e9e9e9; }
+@media(max-width:620px){ .preferences-page { width:calc(100% - 28px); padding-top:28px; } .preferences-grid { grid-template-columns:1fr; gap:16px; } .preferences-badge { display:none; } .app-settings-card { padding:18px; border-radius:16px; } }

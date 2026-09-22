@@ -2396,6 +2396,7 @@
                     </svg>
                     <span class="side-pill-text">检查更新</span>
                 </button>
+                <button class="side-pill" onclick="switchUI(this, 'personal-preferences')" type="button" title="个人偏好"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6"/></svg><span class="side-pill-text">个人偏好</span></button>
                 <button class="side-pill settings-fold-toggle" id="settings-fold-toggle" onclick="toggleSidebarSettings()" type="button" title="设置" aria-expanded="false">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
@@ -2489,6 +2490,7 @@
             <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
             <iframe id="frame-works" data-src="/static/works.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes" allowfullscreen></iframe>
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-personal-preferences" data-src="/static/personal-preferences.html?v=1" loading="eager" scrolling="yes"></iframe>
             <iframe id="frame-app-settings" data-src="/static/app-settings.html?v=2026.08.02.ivory-surfaces.1&amp;feature=shortcuts-runtime.2&amp;feature=depth-map-mode.1" loading="eager" scrolling="yes"></iframe>
             <iframe id="frame-depth-map-tuner" data-src="/static/depth-map-tuner.html?v=2026.09.06.integrated.1" loading="eager" scrolling="yes"></iframe>
             <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.14.canvas-neutral-no-blue.1&amp;feature=shortcuts-runtime.2" loading="eager" scrolling="yes"></iframe>
@@ -2718,7 +2720,7 @@
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const SIDEBAR_MANUAL_MODE_KEY = 'studio_sidebar_manual_mode_v1';
         const DEFAULT_PAGE_ID = 'ecommerce';
-        const PAGE_IDS = ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings','depth-map-tuner'];
+        const PAGE_IDS = ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings','personal-preferences','depth-map-tuner'];
         const PROJECT_URL = 'https://github.com/luojiang419/SHIYIN-AI-source';
         const ADMIN_PAGE_IDS = new Set(['api-settings', 'app-settings', 'depth-map-tuner']);
         const STUDIO_BOOT_TIMEOUT_MS = 6000;

@@ -1276,7 +1276,13 @@ function renderQuickToolbarItems(){
         button.type = 'button';
         button.className = `tool-btn${item.className ? ` ${item.className}` : ''}`;
         button.dataset.toolbarNode = item.id;
-        button.title = item.label;
+        button.title = `${item.label} · 右键隐藏，可在工具栏设置中恢复`;
+        button.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            saveCanvasPreferenceList(QUICK_TOOLBAR_ITEMS_KEY, quickToolbarItemIds().filter(id => id !== item.id));
+            renderQuickToolbarItems();
+        });
         button.innerHTML = `<i data-lucide="${escapeAttr(item.icon)}" class="w-4 h-4"></i><span>${escapeHtml(item.label)}</span>`;
         row.appendChild(button);
     });
@@ -1465,10 +1471,11 @@ function defaultImageGenerationProvider(){
     return providers[0] || null;
 }
 function defaultImageGenerationSelection(){
-    const provider = defaultImageGenerationProvider();
+    const provider = imageApiProviders().find(p => p.id === window.PersonalPreferences?.values.defaultImageProvider) || defaultImageGenerationProvider();
     const providerId = provider?.id || '';
     const models = allImageModels(providerId);
-    return {providerId, model:models[0] || ''};
+    const preferred = window.PersonalPreferences?.profile('image', providerId).model;
+    return {providerId, model:models.includes(preferred) ? preferred : models[0] || ''};
 }
 function providerOptions(selectedId){
     const selected = resolveImageProviderId(selectedId);
@@ -4397,6 +4404,23 @@ function addNode(node){
     scheduleSave();
     return node;
 }
+function applyPersonalGenerationDefaults(node, kind){
+    const defaults = window.PersonalPreferences?.profile(kind, node.apiProvider) || {};
+    Object.assign(node, defaults);
+    if(kind === 'image'){
+        sanitizeImageNodeProviderModel(node);
+        if(defaults.resolution) node._apiResolutionUserSet = true;
+        if(node.type?.startsWith('film-') && defaults.ratio){
+            node.aspectRatio = ({wide:'16:9',story:'9:16',square:'1:1',landscape43:'4:3',portrait43:'3:4',portrait45:'4:5',landscape:'3:2',portrait:'2:3',ultrawide:'21:9',source:'source'})[defaults.ratio] || node.aspectRatio;
+            if(node.storyboardMode === 'batch') node.storyboardBatchAspectRatio = node.aspectRatio;
+        }
+    } else {
+        sanitizeVideoNodeProviderModel(node);
+        if(isMiniMaxH3VideoNode(node)) syncMiniMaxH3VideoDimensions(node);
+        if(node.apiProvider === 'linkfox') window.CanvasLinkfoxVideo?.normalizeUnified(node);
+    }
+    return node;
+}
 // 新建节点默认落在当前画布可视区域中心，而不是浏览器窗口中心（窗口内可能包含边距或嵌入容器）。
 function defaultPoint(dx=0, dy=0){
     const rect = board?.getBoundingClientRect?.() || {left:0, top:0, width:window.innerWidth, height:window.innerHeight};
@@ -4471,18 +4495,18 @@ function addGeneratorNode(point){
     const selection = defaultImageGenerationSelection();
     const providerId = selection.providerId;
     const model = selection.model;
-    return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, prompt:'', ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
+    return addNode(applyPersonalGenerationDefaults({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, prompt:'', ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]}, 'image'));
 }
 function addBatchGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
     const selection = defaultImageGenerationSelection();
-    return addNode({
+    return addNode(applyPersonalGenerationDefaults({
         id:uid('batch'), type:'batchGenerator', x:p.x, y:p.y, title:'批量处理',
         apiProvider:selection.providerId, model:selection.model,
         prompt:'', ratio:'source', resolution:'2k', quality:'auto',
         customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'',
         customWidth:'', customHeight:'', inputs:[]
-    });
+    }, 'image'));
 }
 function addMsGenNode(point){
     const p = point || defaultPoint(140, 0);
@@ -4511,7 +4535,7 @@ function addMsGenNode(point){
 }
 function addVideoNode(point){
     const p = point || defaultPoint(160, 0);
-    const providerId = videoApiProviders()[0]?.id || 'comfly';
+    const providerId = resolveVideoProviderId(window.PersonalPreferences?.values.defaultVideoProvider);
     const models = providerVideoModels(providerId);
     const node = {
         id:uid('vid'),
@@ -4536,13 +4560,18 @@ function addVideoNode(point){
         running:false
     };
     if(isMiniMaxH3VideoNode(node)) applyMiniMaxH3VideoDefaults(node, {force:true});
-    return addNode(node);
+    return addNode(applyPersonalGenerationDefaults(node, 'video'));
 }
 function addLinkfoxVideoNode(point){
     const p=point || defaultPoint(180,0);
     const api=window.CanvasLinkfoxVideo;
     if(!api?.createNode) return null;
     const node=api.createNode(p,{id:uid('linkfox-video')});
+    const defaults=window.PersonalPreferences?.profile('video','linkfox') || {};
+    if(Object.keys(defaults).length){
+        const view=api.normalizeUnified({...node,...defaults,generateAudio:defaults.generateAudio ?? node.voice});
+        Object.assign(node,defaults,{model:view.model,mode:view.mode,duration:view.duration,resolution:view.resolution,aspectRatio:view.aspectRatio,voice:view.voice});
+    }
     return addNode(node);
 }
 function addFilmNode(type, point){
@@ -4550,7 +4579,7 @@ function addFilmNode(type, point){
     if(!api?.isType?.(type)) return null;
     const p = point || defaultPoint(type === 'film-video' ? 180 : 120, 0);
     const imageDefaults = defaultImageGenerationSelection();
-    const preferredVideoProvider = videoApiProviders().find(provider => provider.id === 'kling-cli');
+    const preferredVideoProvider = videoApiProviders().find(provider => provider.id === window.PersonalPreferences?.values.defaultVideoProvider) || videoApiProviders().find(provider => provider.id === 'kling-cli');
     const videoProviderId = preferredVideoProvider?.id || videoApiProviders()[0]?.id || 'comfly';
     const videoModels = providerVideoModels(videoProviderId);
     const node = api.createNode(type, p, type === 'film-video' ? {
@@ -4563,14 +4592,14 @@ function addFilmNode(type, point){
     if(!node) return null;
     node.id = uid(type === 'film-video' ? 'film-video' : type === 'film-line-art' ? 'film-line-art' : 'film-storyboard');
     if(type === 'film-video' && node.apiProvider === 'kling-cli') ensureKlingCapabilities();
-    return addNode(node);
+    return addNode(applyPersonalGenerationDefaults(node, type === 'film-video' ? 'video' : 'image'));
 }
 function addEcommerceNode(type, point){
     if(type === 'lookbook') return addLookbookNode(point);
     const api = window.CanvasEcommerceNodes;
     if(!api?.isType?.(type)) return null;
     const p = point || defaultPoint(type === 'ecom-compose' ? 220 : 80, 0);
-    const providerId = videoApiProviders()[0]?.id || 'comfly';
+    const providerId = resolveVideoProviderId(window.PersonalPreferences?.values.defaultVideoProvider);
     const models = providerVideoModels(providerId);
     const node = api.createNode(type, p, {
         apiProvider:providerId,
@@ -4582,6 +4611,7 @@ function addEcommerceNode(type, point){
         'ecom-compose':'ecom-compose','ecom-video':'ecom-video',
     })[type] || 'ecom';
     node.id = uid(prefix);
+    if(type === 'ecom-video') applyPersonalGenerationDefaults(node, 'video');
     return addNode(node);
 }
 function createFilmWorkflow(point, parentHistoryTx=null){
@@ -11426,6 +11456,7 @@ function filmNodeImageModelOptions(node){
 function bindClassicFilmNode(el,node){
     const api=window.CanvasFilmNodes;
     if(!api) return;
+    let preferenceProvider=node.apiProvider;
     if(isKlingVideoNode(node)) bindKlingConnectionControls(el);
     api.bind(el,node,{
         assets:classicFilmAssets,
@@ -11454,7 +11485,13 @@ function bindClassicFilmNode(el,node){
         polishPrompt:(changed,prompt,assets,onProgress) => polishCanvasVideoPrompt(changed,prompt,canvasFilmPromptReferences(assets),onProgress),
         run:changed => runFilmNode(changed.id),
         toast:message => setStatus(String(message || '').slice(0,180)),
-        onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },
+        onChange:(_changed,meta={}) => {
+            if(node.apiProvider !== preferenceProvider){
+                preferenceProvider=node.apiProvider;
+                applyPersonalGenerationDefaults(node,node.type === 'film-video' ? 'video' : 'image');
+            }
+            scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0);
+        },
     });
     syncClassicStoryboardReferenceDepth(node);
 }
@@ -14887,6 +14924,7 @@ function renderGeneratorBody(node){
         if(!providerModels.includes(resolveImageModel(node.model))) node.model = providerModels[0] || '';
         node._apiResolutionUserSet = false;
         node.resolution = defaultApiImageResolution(node.model);
+        applyPersonalGenerationDefaults(node, 'image');
         modelSelect.innerHTML = imageModelOptions(node.model, node.apiProvider);
         syncSizeControls();
         syncQualityControls();
@@ -15320,6 +15358,7 @@ function renderVideoBody(node){
             node.multimodal = true;
             node.useFrameRoles = false;
         }
+        applyPersonalGenerationDefaults(node, 'video');
         render();
         scheduleSave();
     };
@@ -22025,6 +22064,12 @@ function imageQuickChoiceMenuHtml(node){
         </div>`;
 }
 function imageNodeQuickPromptHtml(node){
+    if(!node.apiProvider && !node.model){
+        const defaults = defaultImageGenerationSelection();
+        node.apiProvider = defaults.providerId;
+        node.model = defaults.model;
+        applyPersonalGenerationDefaults(node, 'image');
+    }
     const camera = imageNodeCameraValue(node);
     const providerId = resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
     const model = node.model || allImageModels(providerId)[0] || '';
@@ -22127,6 +22172,9 @@ function bindImageNodeQuickPrompt(node, panelRoot=selectionHub){
             event.stopPropagation();
             node.apiProvider = resolveImageProviderId(button.dataset.imageQuickProviderValue);
             node.model = allImageModels(node.apiProvider)[0] || '';
+            applyPersonalGenerationDefaults(node, 'image');
+            if(ratio && node.ratio) ratio.value = node.ratio;
+            if(resolution && node.resolution) resolution.value = node.resolution;
             if(provider) provider.value = node.apiProvider;
             if(model) model.value = node.model;
             syncImageQuickDrawerLabels();
@@ -22173,6 +22221,9 @@ function bindImageNodeQuickPrompt(node, panelRoot=selectionHub){
         node.apiProvider = resolveImageProviderId(provider.value);
         const nextModel = allImageModels(node.apiProvider)[0] || '';
         node.model = nextModel;
+        applyPersonalGenerationDefaults(node, 'image');
+        if(ratio && node.ratio) ratio.value = node.ratio;
+        if(resolution && node.resolution) resolution.value = node.resolution;
         if(model?.tagName === 'SELECT') model.innerHTML = imageModelOptions(node.model, node.apiProvider);
         else if(model) model.value = node.model;
         syncImageQuickDrawerLabels();
@@ -25276,6 +25327,7 @@ window.CanvasSessionLifecycle = {
 };
 
 async function initializeCanvasPage(){
+    await window.PersonalPreferences?.ready;
     window.CanvasPerformance?.record?.('classic.editor-ready', performance.now());
     renderQuickToolbarItems();
     startCanvasStatsLoop();

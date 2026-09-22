@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>个人偏好</title>
+  <script src="/static/js/studio-page-state.js"></script>
+  <script src="/static/js/theme.js"></script>
+  <link rel="stylesheet" href="/static/css/app-settings.css">
+  <link rel="stylesheet" href="/static/css/personal-preferences.css">
+  <script defer src="/static/js/quick-save.js"></script>
+  <script defer src="/static/js/personal-preferences.js"></script>
+  <script defer src="/static/js/personal-preferences-page.js"></script>
+</head>
+<body>
+<main class="app-settings-page preferences-page">
+  <header class="app-settings-header"><span>MAKE IT YOURS</span><h1>个人偏好</h1><p>让每一次创作，都从习惯的设置开始。</p></header>
+  <div class="preferences-notice">按当前账号保存，应用于整个工作区。已有节点保留原参数。</div>
+  <form id="preferencesForm" aria-busy="true">
+    <fieldset id="preferencesFields" disabled>
+      <section class="app-settings-card"><div class="app-settings-card-heading"><div><span>01 / IMAGE</span><h2>图片生成</h2></div><span class="preferences-badge">独立平台偏好</span></div><div id="imageSettings"></div></section>
+      <section class="app-settings-card"><div class="app-settings-card-heading"><div><span>02 / VIDEO</span><h2>视频生成</h2></div><span class="preferences-badge">独立平台偏好</span></div><div id="videoSettings"></div></section>
+      <section class="app-settings-card"><div class="app-settings-card-heading"><div><span>03 / SAVE</span><h2>文件保存</h2></div></div>
+        <div class="preferences-grid"><label>保存方式<select id="saveMode"><option value="manual">每次询问保存位置</option><option value="silent">静默保存至指定目录</option></select></label><label>静默保存目录<div class="preferences-directory"><input id="saveDirectory" placeholder="选择保存目录" autocomplete="off"><button id="chooseDirectory" type="button">选择目录</button></div></label></div>
+        <p class="app-settings-note" id="saveHint">桌面客户端下载图片、视频及工程文件时生效，同名文件自动编号。</p>
+      </section>
+      <footer class="preferences-footer"><span id="preferenceStatus" role="status" aria-live="polite">加载偏好…</span><button id="savePreferences" type="submit">保存偏好</button></footer>
+    </fieldset>
+  </form>
+</main>
+</body></html>

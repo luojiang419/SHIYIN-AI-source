@@ -10,7 +10,10 @@ const { chromium } = require('playwright');
   const data = fs.mkdtempSync(path.join(out, 'ui-data-'));
   const port = 39763;
   const origin = `http://127.0.0.1:${port}`;
-  const backend = spawn('python', ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', String(port)], {
+  const stage = process.env.SHIYIN_UI_STAGE && path.resolve(process.env.SHIYIN_UI_STAGE);
+  const executable = stage ? path.join(stage, 'app/backend/canvas-backend/canvas-backend.exe') : 'python';
+  const args = stage ? ['--data-dir', data, '--app-root', path.join(stage, 'app'), '--portable-root', stage, '--host', '127.0.0.1', '--port', String(port), '--runtime-mode', 'desktop', '--parent-pid', String(process.pid)] : ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', String(port)];
+  const backend = spawn(executable, args, {
     cwd: process.cwd(), windowsHide: true,
     env: { ...process.env, CANVAS_DATA_DIR: data, CANVAS_RUNTIME_MODE: 'desktop', CANVAS_PORT: String(port), CANVAS_DWPOSE_AUTO_DOWNLOAD: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -47,6 +50,13 @@ const { chromium } = require('playwright');
     await page.waitForURL(`${origin}/`);
     assert((await (await context.request.get(`${origin}/api/account/me`)).json()).account.is_admin);
     await page.locator('#shiying-api-key-modal:not([hidden])').waitFor();
+    if (stage) {
+      const assistant = await (await context.request.get(`${origin}/api/onboarding/ai-assistant`)).json();
+      assert.notEqual(assistant.status, 'configured');
+      const providers = await (await context.request.get(`${origin}/api/providers`)).json();
+      assert.deepEqual(providers.providers.filter(provider => provider.has_key).map(provider => provider.id), []);
+      await page.locator('#startupAssistantStep').waitFor({ state: 'visible' });
+    }
     await page.locator('#studio-boot-screen').waitFor({ state: 'hidden' });
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.screenshot({ path: path.join(out, 'after-account-guide.png'), fullPage: true });

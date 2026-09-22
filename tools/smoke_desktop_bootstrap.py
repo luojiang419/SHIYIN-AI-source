@@ -97,6 +97,7 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creation_flags,
+            env={**os.environ, "CANVAS_DWPOSE_AUTO_DOWNLOAD": "0"},
         )
         try:
             wait_for_health(arguments.port, process)
@@ -142,7 +143,30 @@ def main() -> int:
                 canvases_payload = json.loads(canvases_response.read().decode("utf-8"))
             if not isinstance(canvases_payload.get("canvases"), list):
                 raise AssertionError("Authenticated canvas API did not return a canvas list")
-            print(json.dumps({"statuses": statuses, "register_status": register_status, "result": "pass"}, ensure_ascii=False))
+            with authenticated_opener.open(f"http://127.0.0.1:{arguments.port}/api/account/me", timeout=5) as response:
+                identity = json.load(response)["account"]
+            if not identity["is_admin"]:
+                raise AssertionError("First local registration must be administrator")
+            # 实际结束冻结后端并重启，新的 Cookie 容器从加密本机凭据恢复。
+            process.terminate()
+            process.wait(timeout=10)
+            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, creationflags=creation_flags,
+                                       env={**os.environ, "CANVAS_DWPOSE_AUTO_DOWNLOAD": "0"})
+            wait_for_health(arguments.port, process)
+            restored_cookies = http.cookiejar.CookieJar()
+            restored_status, restored_headers = request_status(bootstrap_url, restored_cookies)
+            if restored_status != 303 or {key.lower(): value for key, value in restored_headers.items()}.get('location') != '/':
+                raise AssertionError("Packaged desktop login was not restored after process restart")
+            restored = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(restored_cookies))
+            with restored.open(f"http://127.0.0.1:{arguments.port}/api/account/me", timeout=5) as response:
+                if json.load(response)["account"] != identity:
+                    raise AssertionError("Restored account identity changed")
+            post_json(f"http://127.0.0.1:{arguments.port}/api/account/logout", {}, restored_cookies)
+            if {key.lower(): value for key, value in request_status(bootstrap_url)[1].items()}.get('location') != '/login':
+                raise AssertionError("Logout must revoke saved desktop login")
+            print(json.dumps({"statuses": statuses, "register_status": register_status, "first_admin": True,
+                              "process_restart_restored": True, "logout_revoked": True, "result": "pass"}, ensure_ascii=False))
         finally:
             process.terminate()
             try:

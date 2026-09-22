@@ -584,7 +584,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -880,8 +880,6 @@ GRSAI_DEFAULT_BASE_URL = "https://grsaiapi.com"
 GRSAI_DEFAULT_IMAGE_MODELS = ["nano-banana-2", "gpt-image-2"]
 LOCAL_VISION_DEFAULT_BASE_URL = "http://115.231.35.105:12345/v1"
 LOCAL_VISION_DEFAULT_MODEL = "qwen3.5-9b-vlm"
-LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
-LOCAL_VISION_SECRET_SEED_SETTING = "local_vision_builtin_secret_v1"
 MINIMAX_H3_ENV_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "").strip().rstrip("/")
 MINIMAX_H3_LOCAL_BASE_URL = "http://127.0.0.1:7860"
 MINIMAX_H3_DEFAULT_BASE_URL = MINIMAX_H3_ENV_BASE_URL or MINIMAX_H3_LOCAL_BASE_URL
@@ -2198,7 +2196,8 @@ def normalize_provider(item):
     }
 
 def load_api_providers():
-    defaults = default_api_providers()
+    # 新安装也使用完整默认字段，避免缺少协议字段被首次引导误判为手工配置。
+    defaults = [normalize_provider(item) for item in default_api_providers()]
     raw = ADMIN_DATABASE.load_providers()
     if not raw:
         return merge_default_api_providers(defaults)
@@ -2503,21 +2502,9 @@ def update_env_values(updates):
             os.environ.pop(str(key), None)
 
 def seed_builtin_local_vision_secret_once() -> Dict[str, Any]:
-    marker = DATABASE.get_setting(LOCAL_VISION_SECRET_SEED_SETTING, {})
-    marker_value = marker.get("value") if isinstance(marker, dict) else {}
-    if isinstance(marker_value, dict) and marker_value.get("done"):
-        return {"seeded": False, "skipped": True}
-    key_env = provider_key_env("local-vision")
-    seeded = False
-    if not provider_env_key_value("local-vision"):
-        update_env_values({key_env: LOCAL_VISION_BUILTIN_API_KEY})
-        seeded = True
-    DATABASE.save_setting(
-        LOCAL_VISION_SECRET_SEED_SETTING,
-        {"done": True, "seeded": seeded, "completed_at": int(time.time() * 1000)},
-        only_if_empty=True,
-    )
-    return {"seeded": seeded, "skipped": False}
+    # 保留旧启动钩子的返回契约。正式分发不再附带或自动写入服务密钥，
+    # 也不清除升级用户自行保存的配置。
+    return {"seeded": False, "skipped": True}
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)

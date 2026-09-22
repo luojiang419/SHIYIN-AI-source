@@ -109,8 +109,8 @@ def main():
                             time.sleep(0.25)
                         else:
                             raise TimeoutError("Backend health timed out")
-                        login = client.post("/api/account/login", json={"account": "jiang", "password": "jiang"})
-                        assert login.status_code == 200, login.text
+                        login = client.post("/api/account/register", json={"account": "打包测试管理员", "password": "测试自设密码"})
+                        assert login.status_code == 201, login.text
                         capabilities = client.get("/api/linkfox-video/capabilities").json()
                         assert capabilities["installed"] and capabilities["configured"], capabilities
                         references = ["data:image/png;base64," + base64.b64encode(image).decode()] * 3

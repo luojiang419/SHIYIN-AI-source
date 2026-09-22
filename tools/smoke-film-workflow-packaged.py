@@ -90,7 +90,7 @@ def run(stage: Path, data_root: Path, port: int, version: str) -> dict:
 
         caps = client.get(base + "/api/canvas-bridges/film/capabilities", timeout=5).json()
         assert caps["workflow_receive"] is True
-        post("/api/account/login", json={"account": "jiang", "password": "jiang"})
+        post("/api/account/register", json={"account": "打包测试管理员", "password": "测试自设密码"})
         manifest = {"schema": "shiyin-film-bridge", "schema_version": 2, "bridge_id": "film:packaged-smoke:board",
             "direction": "film-to-shiyin", "source": {"project_id": "packaged-smoke", "board_id": "board"},
             "canvas": {"workflow": "film-production-v1"}, "storyboard": {"board_name": "打包联动验证",

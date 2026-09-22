@@ -215,4 +215,6 @@ $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed.' }
 if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw "Installer not found: $installerPath" }
 
+# 历史正式安装包是分发产物，不属于可再生缓存，构建新基线时保留。
+
 Write-Host "Installer built: $installerPath"

@@ -23,6 +23,9 @@ assert 'Max-Age=34560000' in response.headers['set-cookie']
 assert not local.get('/api/account/setup').json()['needs_setup']
 assert local.get('/api/providers').status_code == 200
 assert local.get('/api/onboarding/save-mode').status_code == 200
+assistant = local.get('/api/onboarding/ai-assistant').json()
+assert assistant['status'] in ('not_found', 'detected'), assistant
+assert not any(provider.get('has_key') for provider in local.get('/api/providers').json()['providers'])
 saved_account = local.get('/api/account/me').json()
 
 # 实例重新创建模拟后端重启，Cookie 丢失仍可从本机加密凭据恢复。
@@ -60,7 +63,10 @@ main.ACCOUNT_STORE.update_account(user_id, disabled=True)
 local.cookies.clear()
 assert local.get('/api/auth/bootstrap', follow_redirects=False).headers['location'] == '/login'
 '''
-    environment = dict(os.environ, CANVAS_DATA_DIR=str(tmp_path / 'data'), CANVAS_RUNTIME_MODE='desktop', CANVAS_PORT='3000')
+    clean_environment = {key: value for key, value in os.environ.items()
+                         if not key.startswith('API_PROVIDER_') and not key.endswith(('_KEY', '_TOKEN', '_SECRET'))}
+    environment = dict(clean_environment, CANVAS_DATA_DIR=str(tmp_path / 'data'), CANVAS_PORTABLE_ROOT=str(tmp_path),
+                       CANVAS_RUNTIME_MODE='desktop', CANVAS_PORT='3000')
     result = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).resolve().parents[1], env=environment,
                             capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr

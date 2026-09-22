@@ -1167,37 +1167,19 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertIn('/static/ecommerce.html?workspace=free-creation&amp;v=9.9.9', rendered)
         self.assertNotIn('?v=9.9.9?workspace=', rendered)
 
-    def test_builtin_local_vision_key_is_seeded_only_once(self):
-        class FakeDatabase:
-            def __init__(self, done=False):
-                self.done = done
-                self.saved = None
-
-            def get_setting(self, key, default):
-                return {"value": {"done": self.done}}
-
-            def save_setting(self, key, value, only_if_empty=False):
-                self.saved = (key, value, only_if_empty)
-
-        updates = []
-        fake = FakeDatabase()
-        with (
-            patch.object(self.main, "DATABASE", fake),
-            patch.object(self.main, "provider_env_key_value", return_value=""),
-            patch.object(self.main, "update_env_values", side_effect=lambda value: updates.append(value)),
-        ):
-            result = self.main.seed_builtin_local_vision_secret_once()
-        self.assertTrue(result["seeded"])
-        self.assertEqual(updates[0][self.main.provider_key_env("local-vision")], self.main.LOCAL_VISION_BUILTIN_API_KEY)
-        self.assertTrue(fake.saved[1]["done"])
-
-        with (
-            patch.object(self.main, "DATABASE", FakeDatabase(done=True)),
-            patch.object(self.main, "update_env_values") as update,
-        ):
-            result = self.main.seed_builtin_local_vision_secret_once()
-        self.assertTrue(result["skipped"])
-        update.assert_not_called()
+    def test_local_vision_key_is_never_seeded_or_overwritten(self):
+        for saved_key in ("", "user-configured-test-key"):
+            with (
+                self.subTest(configured=bool(saved_key)),
+                patch.object(self.main, "provider_env_key_value", return_value=saved_key),
+                patch.object(self.main, "update_env_values") as update,
+                patch.object(self.main, "DATABASE") as database,
+            ):
+                result = self.main.seed_builtin_local_vision_secret_once()
+            self.assertEqual(result, {"seeded": False, "skipped": True})
+            update.assert_not_called()
+            database.save_setting.assert_not_called()
+        self.assertFalse(hasattr(self.main, "LOCAL_VISION_BUILTIN_API_KEY"))
 
     def test_ecommerce_capabilities_only_include_configured_provider(self):
         providers = [

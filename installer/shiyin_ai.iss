@@ -273,12 +273,150 @@ begin
   end;
 end;
 
+procedure CopyDirectoryTree(const SourceDir, TargetDir: String);
+var
+  FindRec: TFindRec;
+  SourceItem: String;
+  TargetItem: String;
+begin
+  if not DirExists(SourceDir) then
+    exit;
+  ForceDirectories(TargetDir);
+  if FindFirst(AddBackslash(SourceDir) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        begin
+          SourceItem := AddBackslash(SourceDir) + FindRec.Name;
+          TargetItem := AddBackslash(TargetDir) + FindRec.Name;
+          if FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
+            CopyDirectoryTree(SourceItem, TargetItem)
+          else if not FileCopy(SourceItem, TargetItem, False) then
+            Log('无法迁移抠图运行时文件：' + SourceItem);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure CopyLegacyRuntimeItem(const LegacyInternal, SitePackages, ItemName: String);
+begin
+  if DirExists(AddBackslash(LegacyInternal) + ItemName) then
+    CopyDirectoryTree(AddBackslash(LegacyInternal) + ItemName, AddBackslash(SitePackages) + ItemName)
+  else if FileExists(AddBackslash(LegacyInternal) + ItemName) then
+  begin
+    ForceDirectories(SitePackages);
+    if not FileCopy(AddBackslash(LegacyInternal) + ItemName,
+      AddBackslash(SitePackages) + ItemName, False) then
+      Log('无法迁移抠图运行时文件：' + ItemName);
+  end;
+end;
+
+procedure CopyLegacyRuntimeMetadata(const LegacyInternal, SitePackages, Prefix: String);
+var
+  FindRec: TFindRec;
+begin
+  if FindFirst(AddBackslash(LegacyInternal) + Prefix + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+          (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0) then
+          CopyDirectoryTree(AddBackslash(LegacyInternal) + FindRec.Name,
+            AddBackslash(SitePackages) + FindRec.Name);
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure MigrateLegacyCutoutRuntime;
+var
+  LegacyInternal: String;
+  LegacyModel: String;
+  ComponentRoot: String;
+  InstallationRoot: String;
+  SitePackages: String;
+  ModelTarget: String;
+  RuntimeTarget: String;
+  CurrentFile: String;
+  Items: TArrayOfString;
+  MetadataPrefixes: TArrayOfString;
+  I: Integer;
+begin
+  LegacyInternal := ExpandConstant('{app}\app\backend\canvas-backend\_internal');
+  LegacyModel := AddBackslash(LegacyInternal) + 'models\sam-vit-base';
+  ComponentRoot := ExpandConstant('{app}\data\system\components\cutout-runtime');
+  InstallationRoot := AddBackslash(ComponentRoot) + 'installations\legacy-2.0.3';
+  SitePackages := AddBackslash(InstallationRoot) + 'site-packages';
+  ModelTarget := AddBackslash(InstallationRoot) + 'models\sam-vit-base';
+  RuntimeTarget := AddBackslash(InstallationRoot) + 'runtime';
+  CurrentFile := AddBackslash(ComponentRoot) + 'current.json';
+
+  if FileExists(AddBackslash(InstallationRoot) + 'runtime\ready.marker') and
+    FileExists(AddBackslash(InstallationRoot) + 'models\sam-vit-base\config.json') and
+    FileExists(AddBackslash(InstallationRoot) + 'models\sam-vit-base\model.safetensors') then
+  begin
+    Log('已存在可用的抠图运行时，跳过旧版组件迁移。');
+    exit;
+  end;
+  if (not DirExists(LegacyInternal)) or (not DirExists(AddBackslash(LegacyInternal) + 'torch')) or
+    (not DirExists(AddBackslash(LegacyInternal) + 'transformers')) or
+    (not FileExists(AddBackslash(LegacyModel) + 'config.json')) or
+    (not FileExists(AddBackslash(LegacyModel) + 'model.safetensors')) then
+  begin
+    Log('未发现旧版完整抠图组件，首次使用时将按需下载。');
+    exit;
+  end;
+
+  try
+    Log('发现旧版内置抠图组件，开始迁移以避免重复下载。');
+    Items := ['torch', 'torchgen', 'functorch', 'transformers', 'tokenizers', 'safetensors',
+      'huggingface_hub', 'filelock', 'packaging', 'requests', 'tqdm', 'regex', 'yaml',
+      'fsspec', 'sympy', 'networkx', 'jinja2', 'mpmath', 'markupsafe', 'certifi', 'idna',
+      'urllib3', 'charset_normalizer', 'typing_extensions.py'];
+    for I := 0 to GetArrayLength(Items) - 1 do
+      CopyLegacyRuntimeItem(LegacyInternal, SitePackages, Items[I]);
+    MetadataPrefixes := ['torch-', 'transformers-', 'tokenizers-', 'safetensors-',
+      'huggingface_hub-', 'huggingface_hub-', 'filelock-', 'packaging-', 'requests-',
+      'tqdm-', 'regex-', 'fsspec-', 'sympy-', 'networkx-', 'jinja2-', 'mpmath-'];
+    for I := 0 to GetArrayLength(MetadataPrefixes) - 1 do
+      CopyLegacyRuntimeMetadata(LegacyInternal, SitePackages, MetadataPrefixes[I]);
+    CopyDirectoryTree(LegacyModel, ModelTarget);
+
+    if DirExists(AddBackslash(SitePackages) + 'torch') and
+      DirExists(AddBackslash(SitePackages) + 'transformers') and
+      FileExists(AddBackslash(ModelTarget) + 'config.json') and
+      FileExists(AddBackslash(ModelTarget) + 'model.safetensors') then
+    begin
+      ForceDirectories(RuntimeTarget);
+      SaveStringToFile(AddBackslash(RuntimeTarget) + 'ready.marker', 'cutout-runtime-1.0.0' + #13#10, False);
+      SaveStringToFile(CurrentFile,
+        '{"component":"cutout-runtime","version":"1.0.0","variant":"",' +
+        '"installation":"legacy-2.0.3","source":"legacy-bundled",' +
+        '"source_label":"旧版安装包迁移","activated_at":' +
+        GetDateTimeString('yyyymmddhhnnss', '-', ':') + '}', False);
+      Log('旧版抠图运行时迁移完成；首次透明图片导出无需重新下载。');
+    end
+    else
+      Log('旧版抠图运行时迁移不完整，保留已复制文件并在首次使用时重新下载。');
+  except
+    Log('旧版抠图运行时迁移失败，不影响安装：' + GetExceptionMessage);
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   NeedsRestart := False;
   Result := '';
   if not StopRunningShiyinProcesses() then
     Result := 'Unable to close the old SHIYIN AI process. End SHIYIN AI.exe or app\\backend\\canvas-backend\\canvas-backend.exe in Task Manager and retry.';
+  if Result = '' then
+    MigrateLegacyCutoutRuntime();
 end;
 
 function BlenderPluginRequested(): Boolean;

@@ -15,7 +15,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/profiles':
             self.send(json.loads((DATA/'profiles.json').read_text('utf-8')) if (DATA/'profiles.json').exists() else []);return
-        if self.path in ('/app.js', '/style.css'):
+        if self.path in ('/app.js', '/gpu.js', '/style.css'):
             self.send_response(200);self.send_header('Content-Type', 'text/javascript; charset=utf-8' if self.path.endswith('.js') else 'text/css; charset=utf-8');self.end_headers();self.wfile.write(Path(__file__).with_name(self.path[1:]).read_bytes());return
         if self.path!='/': self.send({},404);return
         self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.end_headers();self.wfile.write(Path(__file__).with_name('index.html').read_bytes())

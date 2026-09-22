@@ -4,7 +4,22 @@ let reference,source,last,records=[],timer,revision=0,running=false,pending=fals
 const assets={};
 $('controls').innerHTML=spec.map(([k,n,a,b,s,v])=>`<div class="control" data-key="${k}"><label for="${k}" class="control-top">${n}<output id="${k}v">${v}</output></label><input id="${k}" type="range" aria-label="${n}" min="${a}" max="${b}" step="${s}" value="${v}"></div>`).join('');
 const values=()=>Object.fromEntries([['model',$('model').value],...spec.map(([k])=>[k,Number($(k).value)])]);
-function dirty(){revision++;last=null;$('save').disabled=true;$('download').hidden=true;clearTimeout(timer);if(!reference||!source)return;$('status').textContent='正在更新预览…';$('preview-badge').textContent='UPDATING';timer=setTimeout(()=>render(false),180)}
+let gpuKey='',preparingKey='',gpuGeneration=0,framePending=false;
+const gpuCanvases=['oi','split-after'].map(id=>{const canvas=document.createElement('canvas');canvas.id=id+'-gpu';canvas.className='gpu-preview';$(id).after(canvas);return canvas});
+let gpu=[];try{gpu=gpuCanvases.map(c=>new ColorGPU(c))}catch(e){$('status').textContent='WebGL 不可用，使用后端预览';gpuCanvases.forEach(c=>c.hidden=true)}
+gpuCanvases.forEach(canvas=>canvas.addEventListener('webglcontextlost',()=>{gpu=[];gpuCanvases.forEach(c=>c.hidden=true);$('oi').hidden=$('split-after').hidden=false;$('status').textContent='WebGL 上下文丢失，已回退后端预览';clearTimeout(timer);timer=setTimeout(()=>render(false),650)}));
+function drawGPU(){if(framePending||!gpu.length)return;framePending=true;requestAnimationFrame(()=>{framePending=false;try{const c=values(),box=roi('ar',true);gpu.forEach(g=>g.draw(c,box));$('preview-badge').textContent='WebGL · FRAME '+gpu[0].frames}catch(e){$('status').textContent=e.message}})}
+async function prepareGPU(){
+ if(!gpu.length||!assets.src||!assets.ref)return;
+ const key=JSON.stringify([assets.src.url,assets.ref.url,$('model').value,$('rr').value,$('sr').value,$('ar').value]);
+ if(key===gpuKey){drawGPU();return}if(key===preparingKey)return;preparingKey=key;const gen=++gpuGeneration;
+ try{const img=await decode(assets.src.preview);let base=img;
+ if(values().model!=='manual'){ $('status').textContent='正在准备自动匹配纹理，完成后滑块即时响应…';const c={...values(),strength:1,lightness:0,contrast:1,chroma:1,a_shift:0,b_shift:0};const r=await request('/fit',{reference:assets.ref.preview,source:assets.src.preview,reference_roi:roi('rr',true),source_roi:roi('sr',true),apply_roi:roi('ar',true),controls:c,preview:true});base=await decode(r.image)}
+ if(gen!==gpuGeneration)return;gpu.forEach(g=>g.upload(img,base));gpuKey=key;gpuCanvases.forEach(c=>c.hidden=false);$('oi').hidden=$('split-after').hidden=true;document.querySelector('.result .empty').hidden=true;drawGPU();
+ }catch(e){$('status').textContent=e.message}finally{if(gen===gpuGeneration)preparingKey=''}
+}
+function dirty(){revision++;last=null;$('save').disabled=true;$('download').hidden=true;clearTimeout(timer);if(!reference||!source)return;$('status').textContent='画面实时更新 · 指标待测量';prepareGPU();timer=setTimeout(()=>render(false),650)}
+
 spec.forEach(([k])=>$(k).oninput=()=>{$(k+'v').value=$(k).value;dirty()});$('model').onchange=dirty;['rr','sr','ar'].forEach(k=>$(k).oninput=dirty);
 function decode(url){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('无法解码图片'));im.src=url})}
 const tokens={};
@@ -25,8 +40,8 @@ async function render(full=false){
  if(running){pending=true;if(full)exporting=true;return}running=true;pending=false;const version=revision,c=values(),started=performance.now();$('run').disabled=true;
  try{const r=await request('/fit',{reference:full?reference:assets.ref.preview,source:full?source:assets.src.preview,reference_roi:roi('rr',!full),source_roi:roi('sr',!full),apply_roi:roi('ar',!full),controls:c,preview:!full});
  if(version!==revision)return;
- last={controls:c,metrics:r.after,resolution:full?'original':'preview'};$('oi').src=$('split-after').src=r.image;metrics(r);$('save').disabled=false;$('preview-badge').textContent=(full?'FULL RES':'LIVE')+' · '+Math.round(performance.now()-started)+' ms';$('status').textContent=full?'原尺寸结果已生成，可下载。':'实时预览已更新 · 指标基于最长边 1000px 预览';if(full){$('download').href=r.image;$('download').hidden=false}
- }catch(e){if(version===revision){$('status').textContent=e.message;$('preview-badge').textContent='检查区域'}}finally{running=false;$('run').disabled=false;if(pending||version!==revision){const fullNext=exporting;exporting=false;clearTimeout(timer);timer=setTimeout(()=>render(fullNext),0)}}
+ last={controls:c,metrics:r.after,resolution:full?'original':'preview'};if(!gpu.length){$('oi').src=$('split-after').src=r.image;}metrics(r);$('save').disabled=false;$('preview-badge').textContent=(full?'FULL RES':'LIVE')+' · '+Math.round(performance.now()-started)+' ms';$('status').textContent=full?'原尺寸结果已生成，可下载。':'实时预览已更新 · 指标基于最长边 1000px 预览';if(full){$('download').href=r.image;$('download').hidden=false}
+ }catch(e){if(version===revision){$('status').textContent=e.message;$('preview-badge').textContent='检查区域'}}finally{running=false;$('run').disabled=false;if(pending||version!==revision){const fullNext=exporting;exporting=false;clearTimeout(timer);timer=setTimeout(()=>render(fullNext),650)}}
 }
 $('run').onclick=()=>{clearTimeout(timer);render(true)};
 async function refresh(){records=await request('/profiles');$('profiles').replaceChildren(new Option('加载面料档案',''),...records.map((p,i)=>new Option(p.name,i)))}
@@ -35,7 +50,7 @@ $('save').disabled=true;$('save').onclick=async()=>{try{if(!last)throw Error('�
 $('profiles').onchange=()=>{if($('profiles').value==='')return;const p=records[$('profiles').value];if(!p)return;$('name').value=p.name;$('model').value=p.controls.model;spec.forEach(([k])=>{$(k).value=p.controls[k];$(k+'v').value=$(k).value});dirty()};
 $('reset').onclick=()=>{spec.forEach(([k,n,a,b,s,v])=>{$(k).value=v;$(k+'v').value=v});dirty()};
 $('export').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({name:$('name').value,controls:values(),metrics:last?.metrics},null,2)],{type:'application/json'}));a.download='fabric-profile.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
-$('wipe').oninput=()=>{$('split-after').style.clipPath=`inset(0 0 0 ${$('wipe').value}%)`;document.querySelector('.split-line').style.left=$('wipe').value+'%'};
+$('wipe').oninput=()=>{$('split-after').style.clipPath=$('split-after-gpu').style.clipPath=`inset(0 0 0 ${$('wipe').value}%)`;document.querySelector('.split-line').style.left=$('wipe').value+'%'};
 for(const type of ['grid','split'])$('view-'+type).onclick=()=>{$('grid').hidden=type!=='grid';$('split').hidden=type!=='split';$('view-grid').classList.toggle('active',type==='grid');$('view-split').classList.toggle('active',type==='split')};
 refresh().catch(e=>$('status').textContent=e.message);
 

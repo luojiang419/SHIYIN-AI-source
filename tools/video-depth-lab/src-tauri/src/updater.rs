@@ -7,8 +7,11 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
+    thread,
+    time::Duration,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 const PUBLIC_KEY: &str = include_str!("../distribution-public-key.hex");
 const BASELINE_RELEASE: &str = include_str!("../distribution-baseline.txt");
@@ -77,6 +80,31 @@ struct Manifest {
 struct UpdateSource {
     manifest: Manifest,
     package_url: String,
+}
+
+#[derive(Clone)]
+struct UpdateInstallSession {
+    parent_pid: u32,
+    stage: PathBuf,
+    root: PathBuf,
+    data_root: PathBuf,
+    version: String,
+}
+
+struct UpdateSessionState {
+    session: Mutex<Option<UpdateInstallSession>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProgress {
+    step_index: u8,
+    progress_percent: u8,
+    step_label: String,
+    message: String,
+    substep: String,
+    is_error: bool,
+    is_success: bool,
 }
 
 fn data(root: &Path) -> PathBuf {
@@ -367,18 +395,308 @@ pub fn apply_downloaded_update(
         .map_err(|_| "没有已下载的更新".to_string())?;
     let pending: serde_json::Value = serde_json::from_str(&raw).map_err(|_| "更新记录无效")?;
     let stage = pending["stage"].as_str().ok_or("更新记录无效")?;
+    let version = pending["version"]
+        .as_str()
+        .filter(|value| release_id(value))
+        .ok_or("更新记录无效")?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Command::new(exe)
+    let updater_exe = data(&state.root)
+        .join("update")
+        .join("SHIYIN-Depth-Batch-Updater.exe");
+    fs::copy(&exe, &updater_exe).map_err(|e| format!("准备独立更新器失败：{e}"))?;
+    Command::new(updater_exe)
         .args([
-            "--apply-depth-batch-update",
-            "--parent-pid",
-            &std::process::id().to_string(),
-            "--stage",
-            stage,
+            "--run-depth-batch-update",
+            &format!("--parent-pid={}", std::process::id()),
+            &format!("--stage={stage}"),
+            &format!("--root={}", state.root.display()),
+            &format!("--data={}", data(&state.root).display()),
+            &format!("--version={version}"),
         ])
         .spawn()
         .map_err(|e| format!("启动独立更新器失败：{e}"))?;
     app.exit(0);
+    Ok(())
+}
+
+fn session_arg(arguments: &[String], name: &str) -> Option<String> {
+    arguments
+        .iter()
+        .find_map(|argument| argument.strip_prefix(name).map(str::to_string))
+}
+
+fn parse_update_session(arguments: &[String]) -> Option<UpdateInstallSession> {
+    if !arguments
+        .iter()
+        .any(|argument| argument == "--run-depth-batch-update")
+    {
+        return None;
+    }
+    let version = session_arg(arguments, "--version=")?;
+    if !release_id(&version) {
+        return None;
+    }
+    Some(UpdateInstallSession {
+        parent_pid: session_arg(arguments, "--parent-pid=")?.parse().ok()?,
+        stage: PathBuf::from(session_arg(arguments, "--stage=")?),
+        root: PathBuf::from(session_arg(arguments, "--root=")?),
+        data_root: PathBuf::from(session_arg(arguments, "--data=")?),
+        version,
+    })
+}
+
+pub fn run_update_session_window_from_args() -> bool {
+    let arguments: Vec<String> = std::env::args().collect();
+    let Some(session) = parse_update_session(&arguments) else {
+        return false;
+    };
+    let result = tauri::Builder::default()
+        .manage(UpdateSessionState {
+            session: Mutex::new(Some(session)),
+        })
+        .setup(|app| {
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.close();
+            }
+            WebviewWindowBuilder::new(app, "update", WebviewUrl::App("updater.html".into()))
+                .title("SHIYIN Depth Batch 正在更新")
+                .inner_size(720.0, 510.0)
+                .min_inner_size(720.0, 510.0)
+                .resizable(false)
+                .closable(false)
+                .center()
+                .build()
+                .map_err(|error| {
+                    Box::new(std::io::Error::other(error.to_string())) as Box<dyn std::error::Error>
+                })?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![run_depth_batch_update_session])
+        .run(tauri::generate_context!());
+    if let Err(error) = result {
+        eprintln!("独立更新器启动失败：{error}");
+    }
+    true
+}
+
+fn emit_update_progress(
+    app: &AppHandle,
+    step_index: u8,
+    progress_percent: u8,
+    step_label: &str,
+    message: &str,
+    substep: &str,
+    is_error: bool,
+    is_success: bool,
+) {
+    let _ = app.emit(
+        "depth-batch-update-progress",
+        UpdateProgress {
+            step_index,
+            progress_percent,
+            step_label: step_label.into(),
+            message: message.into(),
+            substep: substep.into(),
+            is_error,
+            is_success,
+        },
+    );
+}
+
+#[cfg(target_os = "windows")]
+fn run_elevated_script(script: &Path) -> Result<(), String> {
+    use std::{
+        mem::size_of,
+        os::windows::ffi::OsStrExt,
+        ptr::{null, null_mut},
+    };
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError},
+        System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE},
+        UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
+    };
+
+    let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+    let verb = wide(std::ffi::OsStr::new("runas"));
+    let file = wide(std::ffi::OsStr::new("powershell.exe"));
+    let parameters = wide(std::ffi::OsStr::new(&format!(
+        "-NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+        script.display()
+    )));
+    let mut execution: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    execution.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
+    execution.fMask = SEE_MASK_NOCLOSEPROCESS;
+    execution.lpVerb = verb.as_ptr();
+    execution.lpFile = file.as_ptr();
+    execution.lpParameters = parameters.as_ptr();
+    execution.lpDirectory = null();
+    execution.nShow = 0;
+    execution.hProcess = null_mut();
+    if unsafe { ShellExecuteExW(&mut execution) } == 0 {
+        let code = unsafe { GetLastError() };
+        return if code == 1223 {
+            Err("管理员授权已取消；请重新更新并在 Windows 提示中选择“是”。".into())
+        } else {
+            Err(format!("无法启动管理员更新进程（Windows 错误 {code}）"))
+        };
+    }
+    if execution.hProcess.is_null() {
+        return Err("管理员更新进程没有返回有效句柄".into());
+    }
+    unsafe {
+        WaitForSingleObject(execution.hProcess, INFINITE);
+    }
+    let mut exit_code = 1u32;
+    let read_ok = unsafe { GetExitCodeProcess(execution.hProcess, &mut exit_code) };
+    unsafe {
+        CloseHandle(execution.hProcess);
+    }
+    if read_ok == 0 {
+        return Err("无法读取管理员更新进程结果".into());
+    }
+    if exit_code != 0 {
+        return Err(format!("管理员更新脚本执行失败（退出码 {exit_code}）"));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_elevated_script(script: &Path) -> Result<(), String> {
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(script)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("更新脚本执行失败".into())
+    }
+}
+
+fn powershell_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    let normalized = if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+    };
+    normalized.replace('\'', "''")
+}
+
+fn update_script(session: &UpdateInstallSession) -> String {
+    let state_path = session.data_root.join("update").join("installed.json");
+    let pending_path = session.data_root.join("update").join("pending.json");
+    let error_path = session.data_root.join("update").join("apply-error.log");
+    let escaped = powershell_path;
+    let content = format!("$ErrorActionPreference='Stop'; try {{ $p=Get-Process -Id {} -ErrorAction SilentlyContinue; if ($p) {{ $p.WaitForExit() }}; Copy-Item -Path '{}\\*' -Destination '{}' -Recurse -Force; [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName('{}')) | Out-Null; [IO.File]::WriteAllText('{}', '{{\"version\":\"{}\"}}', [Text.UTF8Encoding]::new($false)); Remove-Item -LiteralPath '{}' -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '{}' -Force -ErrorAction SilentlyContinue; exit 0 }} catch {{ [IO.File]::WriteAllText('{}', ($_ | Out-String), [Text.UTF8Encoding]::new($false)); exit 1 }}", session.parent_pid, escaped(&session.stage), escaped(&session.root), escaped(&state_path), escaped(&state_path), session.version, escaped(&pending_path), escaped(&error_path), escaped(&error_path));
+    format!("\u{feff}{content}")
+}
+
+fn install_update(app: &AppHandle, session: &UpdateInstallSession) -> Result<(), String> {
+    if !session.stage.is_dir() || !session.root.is_dir() {
+        return Err("更新目录不存在或已被移动".into());
+    }
+    emit_update_progress(
+        app,
+        0,
+        8,
+        "准备安装",
+        "正在校验更新环境…",
+        "独立更新器已启动。",
+        false,
+        false,
+    );
+    let script = session
+        .data_root
+        .join("update")
+        .join("apply-depth-batch.ps1");
+    let error_path = session.data_root.join("update").join("apply-error.log");
+    fs::create_dir_all(script.parent().ok_or("更新脚本目录无效")?).map_err(|e| e.to_string())?;
+    // Windows PowerShell 5.1 needs a BOM for Chinese user/install paths.
+    fs::write(&script, update_script(session)).map_err(|e| format!("创建更新脚本失败：{e}"))?;
+    emit_update_progress(
+        app,
+        1,
+        22,
+        "关闭旧版本",
+        "正在等待旧版本安全退出…",
+        "不会影响已保存的任务和参数。",
+        false,
+        false,
+    );
+    emit_update_progress(
+        app,
+        2,
+        42,
+        "安装新版本",
+        "等待管理员授权并替换程序文件…",
+        "请在 Windows 提示中允许此次更新。",
+        false,
+        false,
+    );
+    if let Err(error) = run_elevated_script(&script) {
+        let detail = fs::read_to_string(&error_path).unwrap_or_default();
+        return Err(if detail.trim().is_empty() {
+            error
+        } else {
+            detail.trim().to_string()
+        });
+    }
+    emit_update_progress(
+        app,
+        3,
+        91,
+        "启动新版本",
+        "更新安装完成，正在重新启动软件…",
+        "新版本将自动打开。",
+        false,
+        false,
+    );
+    Command::new(session.root.join("SHIYIN-Depth-Batch.exe"))
+        .spawn()
+        .map_err(|e| format!("重新启动软件失败：{e}"))?;
+    emit_update_progress(
+        app,
+        4,
+        100,
+        "更新完成",
+        "新版本已成功启动。",
+        "此窗口即将自动关闭。",
+        false,
+        true,
+    );
+    thread::sleep(Duration::from_millis(1600));
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+fn run_depth_batch_update_session(
+    app: AppHandle,
+    state: State<'_, UpdateSessionState>,
+) -> Result<(), String> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "更新会话状态异常".to_string())?
+        .take()
+        .ok_or("更新会话已经启动")?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = install_update(&handle, &session) {
+            emit_update_progress(
+                &handle,
+                2,
+                42,
+                "更新失败",
+                &error,
+                "软件尚未完成替换，请重新打开后重试。",
+                true,
+                false,
+            );
+        }
+    });
     Ok(())
 }
 pub fn apply_from_args() -> bool {
@@ -422,11 +740,11 @@ pub fn apply_from_args() -> bool {
         .display()
         .to_string()
         .replace('\'', "''");
-    let content = format!("$ErrorActionPreference='Stop'; try {{ $p=Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ $p.WaitForExit() }}; Copy-Item -Path '{}\\*' -Destination '{root_text}' -Recurse -Force; [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName('{state_path}')) | Out-Null; [IO.File]::WriteAllText('{state_path}', '{{\"version\":\"{version}\"}}', [Text.UTF8Encoding]::new($false)); Remove-Item -LiteralPath '{pending_path}' -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '{error_path}' -Force -ErrorAction SilentlyContinue; Start-Process -FilePath '{root_text}\\SHIYIN-Depth-Batch.exe' }} catch {{ [IO.File]::WriteAllText('{error_path}', $_ | Out-String, [Text.UTF8Encoding]::new($false)); Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('更新安装失败，详情已写入 apply-error.log。','SHIYIN 更新器') | Out-Null }}", stage.replace('\'', "''"));
+    let content = format!("$ErrorActionPreference='Stop'; try {{ $p=Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ $p.WaitForExit() }}; Copy-Item -Path '{}\\*' -Destination '{root_text}' -Recurse -Force; [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName('{state_path}')) | Out-Null; [IO.File]::WriteAllText('{state_path}', '{{\"version\":\"{version}\"}}', [Text.UTF8Encoding]::new($false)); Remove-Item -LiteralPath '{pending_path}' -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '{error_path}' -Force -ErrorAction SilentlyContinue; Start-Process -FilePath '{root_text}\\SHIYIN-Depth-Batch.exe' }} catch {{ [IO.File]::WriteAllText('{error_path}', ($_ | Out-String), [Text.UTF8Encoding]::new($false)); Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('更新安装失败，详情已写入 apply-error.log。','SHIYIN 更新器') | Out-Null }}", stage.replace('\'', "''"));
     if let Some(parent) = script.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if fs::write(&script, content).is_ok() {
+    if fs::write(&script, format!("\u{feff}{content}")).is_ok() {
         let script_text = script.display().to_string().replace('\'', "''");
         let elevate = format!("$script='{script_text}'; Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File \"' + $script + '\"')");
         let _ = Command::new("powershell.exe")
@@ -446,6 +764,53 @@ pub fn apply_from_args() -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    #[cfg(windows)]
+    fn update_script_executes_and_reports_copy_failure() {
+        let temp = tempdir().unwrap();
+        let base = temp.path().join("更新 测试's");
+        let stage = base.join("stage");
+        let root = base.join("install");
+        let data_root = base.join("data");
+        fs::create_dir_all(stage.join("worker")).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(data_root.join("update")).unwrap();
+        fs::write(stage.join("worker/test.txt"), "new version").unwrap();
+        let session = UpdateInstallSession {
+            parent_pid: 0,
+            stage: fs::canonicalize(&stage).unwrap(),
+            root: fs::canonicalize(&root).unwrap(),
+            data_root,
+            version: "20260922105810".into(),
+        };
+        let pending = session.data_root.join("update/pending.json");
+        let installed = session.data_root.join("update/installed.json");
+        let error = session.data_root.join("update/apply-error.log");
+        let script = base.join("apply.ps1");
+        fs::write(&pending, "pending").unwrap();
+        fs::write(&script, update_script(&session).replace("Get-Process -Id 0", "Get-Process -Id 2147483647")).unwrap();
+        let run = || Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script).output().unwrap();
+        let output = run();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read_to_string(root.join("worker/test.txt")).unwrap(), "new version");
+        assert!(fs::read_to_string(&installed).unwrap().contains(&session.version));
+        assert!(!pending.exists());
+        assert!(!error.exists());
+        // Force a real copy failure; the installed version must not advance.
+        use std::os::windows::fs::OpenOptionsExt;
+        let _locked = fs::OpenOptions::new().read(true).share_mode(0)
+            .open(root.join("worker/test.txt")).unwrap();
+        fs::write(&pending, "pending").unwrap();
+        fs::write(&installed, "previous version").unwrap();
+        let output = run();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(!fs::read_to_string(error).unwrap().trim().is_empty());
+        assert!(pending.exists());
+        assert_eq!(fs::read_to_string(installed).unwrap(), "previous version");
+    }
 
     #[test]
     fn modelscope_fallback_reports_release_after_installer_baseline() {

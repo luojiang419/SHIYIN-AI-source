@@ -1,7 +1,7 @@
 # SHIYIN-Depth-Batch 安装包与更新发布
 
-状态：1.0.3 更新器修复版和魔塔签名验证更新已发布；公开清单、下载、签名及逐文件校验通过。
-下一步：用户用 1.0.3 安装包覆盖旧版，再点击检查更新，确认 UAC 授权、替换和重启体验。
+状态：独立更新器退出码 1 的脚本解析错误已修复；Windows PowerShell 实际执行回归、界面测试和 release 编译通过。
+下一步：本地演示版已准备；公开渠道仍为原 1.0.3，待演示确认后再发布。
 TODO：
 - [x] 取消便携包构建入口，提供 Windows 安装器
 - [x] 接入签名增量更新与独立更新进程
@@ -9,10 +9,19 @@ TODO：
 - [x] 创建并接入魔塔 `SHIYIN-Depth-Batch` 仓库
 - [x] 编译、安装包检查和缓存上限检查
 最近验证：1.0.3 Rust `cargo check`、魔塔回退联网测试、批量界面 Node 9 项和 Python 7 项通过；Inno Setup 构建通过。公开目录签名、107,476,910 字节更新包 SHA-256 和 ZIP 内 13 个文件逐项校验通过。
-branch/commit：`feat/video-depth-batch-delivery` / `c276b989`
+branch/commit：`fix/depth-batch-update-script` / 本次修复见 Git 最新提交。
 阻塞：无。
 
 [CODEX_LONG_TASK_CONTINUE_V3]
+
+## 2026-09-22 独立更新器退出码 1
+
+- 现场 `%LOCALAPPDATA%/SHIYIN-Depth-Batch/update/apply-depth-batch.ps1` 的 `WriteAllText(..., $_ | Out-String, ...)` 无法解析，PowerShell 在进入 try/catch 前退出，因此没有 apply-error.log。新旧两个脚本入口均改为带括号的管道表达式。
+- 生成脚本增加 UTF-8 BOM，支持 Windows PowerShell 5.1 中文路径；独立更新流程规范化 canonicalize 产生的扩展路径。
+- 新增执行生产脚本的 Rust 回归：中文/空格/单引号路径复制及版本写入；目标独占锁定时错误日志、退出码和原版本/待更新记录保留。测试通过。批量界面 6 项通过，release 编译通过。
+- 修复版宿主：`dist/depth-batch-repair/SHIYIN-Depth-Batch.exe`，SHA-256 `cf669465f742ddc649c3b61d6e594fecb38ad81732020846c19520abac747d23`。本轮未构建安装包、未发布魔搭，保留原版本号。
+- 本地真实独立更新器已执行，隔离状态目录 `.build/depth-batch-updater-fix/data/update/installed.json` 已登记 `20260922105810`。演示目录沿用 `.build/depth-batch-ui-demo-20260922`。
+- 构建后缓存检查：`.build` 0.699 GiB，`.codex-tmp` 8.353 GiB，均低于 20 GiB。
 
 ## 目标
 

@@ -179,21 +179,59 @@ attachPlaybackControls($('[data-preview-controls]'), preview, $('[data-preview-p
 attachPlaybackControls($('[data-compare-controls]'), sourceVideo, null, [depthVideo]);
 
 const updateButton = document.querySelector('#check-update');
-if (updateButton) updateButton.onclick = async () => {
-  if (!invoke) return;
-  const original = updateButton.textContent;
-  updateButton.disabled = true;
-  updateButton.textContent = '…';
+const updateModal = $('[data-update-modal]'), updateTitle = $('[data-update-title]');
+const updateVersion = $('[data-update-version]'), updateSize = $('[data-update-size]');
+const updateCopy = $('[data-update-copy]'), updateNotes = $('[data-update-notes]');
+const updateActivity = $('[data-update-activity]'), updateActivityText = $('[data-update-activity-text]');
+const updateLater = $('[data-update-later]'), updateApply = $('[data-update-apply]');
+let updateChecking = false, activeUpdate = null;
+function closeUpdateModal() { if (!updateApply.disabled) updateModal.hidden = true; }
+function showUpdateStatus(title, message) {
+  activeUpdate = null; updateTitle.textContent = title; updateVersion.textContent = 'SHIYIN Depth Batch';
+  updateSize.textContent = ''; updateCopy.textContent = message; updateNotes.textContent = '';
+  updateActivity.hidden = true; updateLater.hidden = true; updateApply.disabled = false; updateApply.textContent = '确定'; updateModal.hidden = false;
+}
+function showAvailableUpdate(info) {
+  activeUpdate = info; updateTitle.textContent = info.downloaded ? '更新已准备完成' : '发现软件更新';
+  updateVersion.textContent = info.latestVersion; updateSize.textContent = `${(Number(info.assetSize || 0) / 1048576).toFixed(1)} MB`;
+  updateCopy.textContent = '独立更新器会关闭当前软件、完成文件替换并自动重新启动。开始前请保存正在进行的工作。';
+  updateNotes.textContent = String(info.releaseNotes || '').trim() || '功能优化与问题修复';
+  updateActivity.hidden = true; updateLater.hidden = false; updateApply.disabled = false;
+  updateLater.textContent = '稍后提醒'; updateApply.textContent = info.downloaded ? '立即安装并重启' : '立即更新'; updateModal.hidden = false;
+}
+async function checkForSoftwareUpdate(manual = false) {
+  if (!invoke || updateChecking) return;
+  updateChecking = true;
+  const original = updateButton?.textContent;
+  if (updateButton) { updateButton.disabled = true; updateButton.textContent = '…'; }
   try {
-    const update = await invoke('check_for_update');
-    if (!update.available) { alert(`当前已是最新版本 v${update.currentVersion}`); return; }
-    const notes = update.releaseNotes ? `\n\n更新说明：${update.releaseNotes}` : '';
-    if (!confirm(`发现 SHIYIN 批量深度视频提取器更新 ${update.latestVersion}，包大小 ${(update.assetSize / 1048576).toFixed(1)} MB。${notes}\n\n立即下载并更新？`)) return;
-    updateButton.textContent = '↓';
-    const downloaded = update.downloaded ? update : await invoke('download_update');
-    if (downloaded.downloaded && confirm('更新已下载并校验完成。现在关闭软件、由独立更新器安装并重新启动？')) {
-      await invoke('apply_downloaded_update');
-    }
-  } catch (error) { alert(`检查或安装更新失败：${error}`); }
-  finally { updateButton.disabled = false; updateButton.textContent = original; }
+    const info = await invoke('check_for_update');
+    if (info.available) showAvailableUpdate(info);
+    else if (manual) showUpdateStatus('当前已是最新版本', `当前版本 v${info.currentVersion}，暂无可用更新。`);
+  } catch (error) {
+    if (manual) showUpdateStatus('检查更新失败', String(error?.message || error || '未知错误'));
+  } finally {
+    updateChecking = false;
+    if (updateButton) { updateButton.disabled = false; updateButton.textContent = original; }
+  }
+}
+updateApply.onclick = async () => {
+  if (!activeUpdate) { updateModal.hidden = true; return; }
+  updateApply.disabled = true; updateLater.disabled = true; $('[data-update-close]').disabled = true;
+  updateActivity.hidden = false; updateActivityText.textContent = activeUpdate.downloaded ? '正在启动独立更新器…' : '正在下载并校验更新包…';
+  updateApply.textContent = activeUpdate.downloaded ? '正在启动…' : '正在下载…';
+  try {
+    if (!activeUpdate.downloaded) activeUpdate = await invoke('download_update');
+    updateActivityText.textContent = '校验完成，正在打开独立更新器并关闭当前软件…';
+    updateApply.textContent = '正在启动独立更新器…';
+    await invoke('apply_downloaded_update');
+  } catch (error) {
+    updateActivity.hidden = true; updateCopy.textContent = `更新失败：${String(error?.message || error)}`;
+    updateApply.disabled = false; updateLater.disabled = false; $('[data-update-close]').disabled = false; updateApply.textContent = '重试更新';
+  }
 };
+updateLater.onclick = closeUpdateModal;
+$('[data-update-close]').onclick = closeUpdateModal;
+updateModal.onclick = event => { if (event.target === updateModal) closeUpdateModal(); };
+if (updateButton) updateButton.onclick = () => checkForSoftwareUpdate(true);
+setTimeout(() => checkForSoftwareUpdate(false), 1200);

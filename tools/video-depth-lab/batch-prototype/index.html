@@ -67,6 +67,24 @@
 
     </main>
     <div class="toast" data-toast hidden></div>
+    <div class="update-modal" data-update-modal hidden>
+      <section class="update-modal-panel" role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
+        <header class="update-modal-head">
+          <div><span class="eyebrow">SHIYIN DEPTH BATCH</span><h2 id="update-modal-title" data-update-title>发现软件更新</h2></div>
+          <button class="update-modal-close" data-update-close type="button" aria-label="关闭">×</button>
+        </header>
+        <div class="update-modal-body">
+          <div class="update-version-row"><span class="update-orbit" aria-hidden="true"><i></i></span><div><small>可用版本</small><strong data-update-version>正在检查…</strong></div><b data-update-size></b></div>
+          <p data-update-copy>正在读取更新信息。</p>
+          <div class="update-notes"><span>本次更新内容</span><p data-update-notes></p></div>
+          <div class="update-activity" data-update-activity hidden><i></i><span data-update-activity-text>正在准备更新…</span></div>
+        </div>
+        <footer class="update-modal-actions">
+          <button class="button muted" data-update-later type="button">稍后提醒</button>
+          <button class="button primary" data-update-apply type="button">立即更新</button>
+        </footer>
+      </section>
+    </div>
     <dialog class="compare-dialog" data-compare-dialog><header><div><span class="eyebrow">COMPARE</span><h2>划像对比播放</h2></div><button class="icon-button" data-action="close-compare" type="button" title="关闭">×</button></header><div class="compare-stage" data-compare-stage><div class="compare-depth"><span class="depth-scene" data-compare-depth><i></i><i></i><i></i><b></b></span></div><div class="compare-source" data-compare-source><span>源视频</span></div><i class="compare-divider" data-compare-divider><span>‹<b></b>›</span></i><input data-compare-wipe type="range" min="0" max="100" value="50" aria-label="划像位置"></div><div class="playback-controls" data-compare-controls></div><footer><span data-compare-name>fashion_walk_01.mp4</span><span>拖动中间手柄对比源视频与深度视频</span></footer></dialog>
     <script src="./native.js"></script>
 

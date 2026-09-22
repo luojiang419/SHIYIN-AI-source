@@ -3,6 +3,33 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
+test('启动时自动检查一次并在主窗口中央显示更新弹窗', async () => {
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage({viewport:{width:1280,height:820}});
+    await page.addInitScript(() => {
+      window.calls = [];
+      window.__TAURI__ = {event:{listen:async () => () => {}},core:{convertFileSrc:p => p,invoke:async name => {
+        window.calls.push(name);
+        if(name === 'get_runtime_status') return {runtimeReady:true,device:'cpu',models:[]};
+        if(name === 'check_for_update') return {currentVersion:'1.0.3',latestVersion:'20260922105810',available:true,downloaded:false,assetSize:107476910,releaseNotes:'独立更新器与自动重启演示'};
+        if(name === 'download_update') return {currentVersion:'1.0.3',latestVersion:'20260922105810',available:true,downloaded:true,assetSize:107476910,releaseNotes:'独立更新器与自动重启演示'};
+      }}};
+    });
+    await page.goto(pathToFileURL(fileURLToPath(new URL('../batch-prototype/index.html',import.meta.url))).href);
+    await page.locator('[data-update-modal]').waitFor({state:'visible'});
+    const box = await page.locator('[data-update-modal] .update-modal-panel').boundingBox();
+    assert.ok(Math.abs((box.x + box.width / 2) - 640) < 3);
+    assert.ok(Math.abs((box.y + box.height / 2) - 410) < 3);
+    assert.equal(await page.locator('[data-update-version]').textContent(),'20260922105810');
+    assert.match(await page.locator('[data-update-notes]').textContent(),/独立更新器与自动重启/);
+    assert.equal(await page.evaluate(() => window.calls.filter(name => name === 'check_for_update').length),1);
+    await page.locator('[data-update-apply]').click();
+    await page.waitForFunction(() => window.calls.includes('apply_downloaded_update'));
+    assert.deepEqual(await page.evaluate(() => window.calls.filter(name => ['download_update','apply_downloaded_update'].includes(name))),['download_update','apply_downloaded_update']);
+  } finally { await browser.close(); }
+});
+
 test('批量界面串行调用真实命令、保留参数并隔离失败任务', async () => {
   const browser = await chromium.launch({headless:true});
   try {

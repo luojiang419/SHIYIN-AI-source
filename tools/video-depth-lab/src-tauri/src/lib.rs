@@ -700,6 +700,7 @@ pub fn run() {
                 active_pid: Arc::new(Mutex::new(None)),
             });
             app.manage(updater::UpdateState { root });
+            if let Some(window) = app.get_webview_window("main") { let _ = window.show(); }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -728,6 +729,10 @@ pub fn run() {
 
 pub fn apply_depth_batch_update_from_args() -> bool {
     updater::apply_from_args()
+}
+
+pub fn run_depth_batch_update_session_from_args() -> bool {
+    updater::run_update_session_window_from_args()
 }
 
 #[cfg(test)]

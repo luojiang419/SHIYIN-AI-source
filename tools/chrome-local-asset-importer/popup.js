@@ -9,6 +9,7 @@ const els = {
   model: document.getElementById('modelSelect'),
   prompt: document.getElementById('promptInput'),
   scan: document.getElementById('scanBtn'),
+  scanKling: document.getElementById('scanKlingBtn'),
   pin: document.getElementById('pinBtn'),
   github: document.getElementById('githubBtn'),
   settingsToggle: document.getElementById('settingsToggleBtn'),
@@ -82,6 +83,35 @@ function mediaKindFromUrl(url){
   const clean = decodeURIComponent(String(url || '').split(/[?#]/, 1)[0]).toLowerCase();
   if(/\.(mp4|webm|mov|m4v|flv)$/.test(clean)) return 'video';
   return 'image';
+}
+
+function isKlingPage(url){
+  try {
+    const host = new URL(String(url || '')).hostname.toLowerCase();
+    return host === 'kling.ai' || host.endsWith('.kling.ai') || host === 'klingai.com' || host.endsWith('.klingai.com');
+  } catch {
+    return false;
+  }
+}
+
+function klingResultScore(item){
+  const kind = item?.kind || mediaKindFromUrl(item?.url);
+  const width = Number(item?.width || 0);
+  const height = Number(item?.height || 0);
+  const url = String(item?.url || '').toLowerCase();
+  let score = Number(item?.priority || 0);
+  if(kind === 'video') score += 10000;
+  if(item?.fromNetwork) score += 1000;
+  if(width >= 720 || height >= 720) score += 400;
+  if(/(?:result|output|generation|video|media|asset|download)/.test(url)) score += 200;
+  if(item?.streamType === 'stream') score -= 5000;
+  return score;
+}
+
+function prioritizeKlingResults(items){
+  return [...items]
+    .filter(item => item?.url && item.streamType !== 'stream')
+    .sort((left, right) => klingResultScore(right) - klingResultScore(left));
 }
 
 function inferImageSizeFromUrl(url){
@@ -969,6 +999,28 @@ async function scanImages(){
     : '当前页面没有扫描到可用素材。');
 }
 
+async function scanKlingResults(){
+  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  if(!tab?.id) throw new Error('没有可扫描的当前标签页');
+  if(!isKlingPage(tab.url)) throw new Error('请先切换到 kling.ai 或 klingai.com 的可灵页面');
+  setStatus('正在读取当前可灵页面的已展示成片...');
+  await closeImagePreview();
+  const results = await chrome.scripting.executeScript({
+    target: {tabId: tab.id, allFrames: true},
+    func: collectPageImages,
+  });
+  images = prioritizeKlingResults(mergeSniffedMedia(mergeFrameImages(results), await getSniffedMedia(tab.id)));
+  selected = new Set();
+  if(!els.folder.value || els.folder.value === '网页采集') els.folder.value = '可灵成片';
+  renderGrid();
+  images = prioritizeKlingResults(await enrichMediaSizes(images));
+  renderGrid();
+  const videoCount = images.filter(item => (item.kind || mediaKindFromUrl(item.url)) === 'video').length;
+  setStatus(images.length
+    ? `已读取 ${images.length} 个可灵页面素材，其中 ${videoCount} 个视频成片；请勾选后导入。`
+    : '当前可灵页面没有读取到可导入成片。请打开作品或生成结果详情后重试。');
+}
+
 // 向后台 service worker 取本标签页嗅探到的媒体请求（XHR/fetch 加载、DOM 里看不到的）。
 function getSniffedMedia(tabId){
   return new Promise(resolve => {
@@ -1366,6 +1418,7 @@ els.settingsToggle.addEventListener('click', () => {
   saveSettings();
 });
 els.scan.addEventListener('click', () => scanImages().catch(err => setStatus(err.message || '扫描失败')));
+els.scanKling?.addEventListener('click', () => scanKlingResults().catch(err => setStatus(err.message || '可灵扫描失败')));
 els.capture?.addEventListener('click', () => captureVisibleArea().catch(err => setStatus(err.message || '截取失败')));
 els.download.addEventListener('click', () => downloadSelected().catch(err => {
   setStatus(err.message || '下载失败');

@@ -1,7 +1,7 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SHIYIN 批量深度视频提取器",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "identifier": "com.shiyin.depth.batch",
   "build": {
     "frontendDist": "../batch-prototype"

@@ -813,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn modelscope_fallback_reports_release_after_installer_baseline() {
+    fn modelscope_fallback_reports_signed_release() {
         let temp = tempdir().unwrap();
         save(
             temp.path(),
@@ -825,7 +825,8 @@ mod tests {
         .unwrap();
         let source = catalog(temp.path()).unwrap();
         assert!(source.package_url.contains("modelscope.cn"));
-        assert!(source.manifest.version.as_str() > BASELINE_RELEASE.trim());
-        assert!(info(&source.manifest, temp.path()).available);
+        assert!(release_id(&source.manifest.version));
+        assert_eq!(info(&source.manifest, temp.path()).available,
+            source.manifest.version.as_str() > BASELINE_RELEASE.trim());
     }
 }

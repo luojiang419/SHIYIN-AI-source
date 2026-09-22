@@ -1,18 +1,29 @@
 # SHIYIN-Depth-Batch 安装包与更新发布
 
-状态：独立更新器退出码 1 的脚本解析错误已修复；Windows PowerShell 实际执行回归、界面测试和 release 编译通过。
-下一步：本地演示版已准备；公开渠道仍为原 1.0.3，待演示确认后再发布。
+状态：1.0.4 已发布到魔搭，错误的 3 个旧安装包及 4 个旧更新包已从 master 移除，公开清单与下载验证通过。
+下一步：旧版用户使用 1.0.4 安装包覆盖升级；本次发布已完成。
 TODO：
 - [x] 取消便携包构建入口，提供 Windows 安装器
 - [x] 接入签名增量更新与独立更新进程
 - [x] 分发中心按产品隔离深度批量工具更新
 - [x] 创建并接入魔塔 `SHIYIN-Depth-Batch` 仓库
 - [x] 编译、安装包检查和缓存上限检查
-最近验证：1.0.3 Rust `cargo check`、魔塔回退联网测试、批量界面 Node 9 项和 Python 7 项通过；Inno Setup 构建通过。公开目录签名、107,476,910 字节更新包 SHA-256 和 ZIP 内 13 个文件逐项校验通过。
+最近验证：1.0.4 release / Inno Setup 构建通过；Windows PowerShell 成功与文件占用失败回归、魔搭回退联网签名测试通过；安装包与更新包公开完整下载 SHA-256 通过，更新包 13 个文件逐项校验通过。远端仅剩 1.0.4 发布文件、公开清单与仓库说明/配置。
 branch/commit：`fix/depth-batch-update-script` / 本次修复见 Git 最新提交。
 阻塞：无。
 
 [CODEX_LONG_TASK_CONTINUE_V3]
+
+## 1.0.4 正式修复发布与旧版本清理
+
+- 用户确认本地更新演示正常后授权重新发布并清理错误版本。
+- 安装包：`dist/installer/SHIYIN-Depth-Batch-Setup-1.0.4.exe`，107,711,206 字节，SHA-256 `33e5315744e7b2e6e6905d5e2f3f15fff08a56d415d2839f25819066de528905`。
+- 安装与热更新共用基线 `20260922130029`。签名快照：`dist/depth-batch-hot-update/20260922130029`；更新包 107,533,201 字节，SHA-256 `e96798df8533d48e06dbd1bab0c6735a453b9760345ad9d39145e25bddea577d`。
+- 公开仓库 `jiangjiang419/SHIYIN-Depth-Batch` 的安装包路径 `releases/1.0.4/`，更新包路径 `updates/20260922130029/`；`public/catalog.json` 与 README 已切换。旧版更新器不能自修复，README 明确要求 1.0.1–1.0.3 用户覆盖安装 1.0.4。
+- 清理了 `releases/1.0.1`、`1.0.2`、`1.0.3` 内的安装包，以及 `updates/20260922102509`、`20260922103240`、`20260922105200`、`20260922105810` 内的更新包，共 7 个文件。魔搭删除提交 `fdc731767ebbe0dd7eedb2cb2cf396fdaa235cd5`；历史提交与本地 dist 旧产物保留，可恢复。
+- 发布脚本 `tools/video-depth-lab/scripts/publish-modelscope.py` 验证签名与逐文件哈希后上传，公开回读成功才切换清单。SDK 文件删除 API 返回 401，改用已认证的 Git 副本执行普通删除提交；远端列表存在短暂同步延迟，采用有界重查验证。
+- 发布证据保存在快照中的 `publication.json`、`remote-before.json`、`remote-cleanup.json` 与 `remote-after.json`。未修改主软件或固定模型资源。
+- 构建后缓存检查 `.build` 0.699 GiB、`.codex-tmp` 8.607 GiB；均低于上限。
 
 ## 2026-09-22 独立更新器退出码 1
 

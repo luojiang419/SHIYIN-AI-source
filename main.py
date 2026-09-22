@@ -3002,6 +3002,7 @@ def is_desktop_account_request(request: Request) -> bool:
 def account_setup_status(request: Request):
     return JSONResponse({
         "needs_setup": ACCOUNT_STORE.needs_setup(),
+        "has_registered_accounts": ACCOUNT_STORE.has_registered_accounts(),
         "can_setup": is_loopback_address(request_remote_address(request)),
         "persistent_login": is_desktop_account_request(request),
     }, headers={"Cache-Control": "no-store"})

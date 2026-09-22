@@ -156,7 +156,17 @@ class AccountStoreTests(unittest.TestCase):
                 connection.commit()
             finally:
                 connection.close()
+            with sqlite3.connect(store.database_path) as connection:
+                original_password_hash = connection.execute("SELECT password_hash FROM accounts WHERE id='legacy-id'").fetchone()[0]
+            connection.close()
+            original_file = Path(root) / 'accounts' / 'legacy-folder' / 'original-work.txt'
+            original_file.parent.mkdir(parents=True)
+            original_file.write_bytes(b'original user data')
             store.initialize()
+            self.assertTrue(store.has_registered_accounts())
+            self.assertEqual(original_file.read_bytes(), b'original user data')
+            with store.connect() as connection:
+                self.assertEqual(connection.execute("SELECT password_hash FROM accounts WHERE id='legacy-id'").fetchone()[0], original_password_hash)
             with store.connect() as connection:
                 columns = {row["name"] for row in connection.execute("PRAGMA table_info(accounts)")}
                 account_key = connection.execute(

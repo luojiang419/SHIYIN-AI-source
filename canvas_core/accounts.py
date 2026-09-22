@@ -259,6 +259,10 @@ class AccountStore:
             connection.execute("DELETE FROM sessions WHERE expires_at>0 AND expires_at<?", (now_ms(),))
             connection.execute("DELETE FROM sessions WHERE account_id NOT IN (SELECT id FROM accounts)")
 
+    def has_registered_accounts(self) -> bool:
+        with self.connect() as connection:
+            return connection.execute("SELECT 1 FROM accounts LIMIT 1").fetchone() is not None
+
     def needs_setup(self) -> bool:
         with self.connect() as connection:
             return not bool(connection.execute("SELECT 1 FROM accounts WHERE role='admin'").fetchone())

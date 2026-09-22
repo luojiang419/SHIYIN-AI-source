@@ -157,9 +157,10 @@ body{background:var(--bg)}main{box-shadow:none}.brand,.steps,.note{display:none}
     const confirmation=document.getElementById('confirmPassword');
     function renderMode(next){
       mode=next;const registering=mode==='register',first=setup.needs_setup;
+      const existing=setup.has_registered_accounts&&!registering;
       document.querySelectorAll('.tab').forEach(item=>{item.classList.toggle('active',item.dataset.mode===mode);item.disabled=!ready||(item.dataset.mode==='register'&&first&&!setup.can_setup)});
-      document.getElementById('heading').textContent=first?'欢迎使用，先设置账号':registering?'创建独立账号':'欢迎回来';
-      document.getElementById('description').textContent=first?'首次在软件本机注册的账号即为管理员，可配置 API 等敏感设置。':'管理员可以操作 API 配置等敏感设置，后续注册的账号为普通账号。';
+      document.getElementById('heading').textContent=existing?'使用原账号登录':first?'欢迎使用，先设置账号':registering?'创建独立账号':'欢迎回来';
+      document.getElementById('description').textContent=existing?'升级用户无需重新注册，使用原账号和密码登录即可继续访问原有画布、素材和生成资源。':first?'首次在软件本机注册的账号即为管理员，可配置 API 等敏感设置。':'管理员可以操作 API 配置等敏感设置，后续注册的账号为普通账号。';
       document.getElementById('steps').hidden=!first||!setup.can_setup;
       document.getElementById('persistence').textContent=setup.persistent_login?'账号密码只需在第一次使用时注册设置，软件会记住登录状态，后续启动无需再登录。主要用于多人使用时的数据隔离；主动退出或切换账号时才需重新登录。':'账号用于多人使用时的数据隔离。桌面软件首次登录后会记住账号，后续启动无需重复登录；浏览器会话到期后需重新登录。';
       document.getElementById('confirmLabel').hidden=!registering;confirmation.required=registering;
@@ -174,7 +175,7 @@ body{background:var(--bg)}main{box-shadow:none}.brand,.steps,.note{display:none}
       try{
         const response=await fetch('/api/account/setup',{cache:'no-store'});
         if(!response.ok)throw new Error('无法读取账号设置，请刷新重试');
-        setup=await response.json();ready=true;renderMode(setup.needs_setup&&setup.can_setup?'register':'login');
+        setup=await response.json();ready=true;renderMode(setup.needs_setup&&setup.can_setup&&!setup.has_registered_accounts?'register':'login');
       }catch(error){message.className='error';message.textContent=error.message}
     }
     initialize();

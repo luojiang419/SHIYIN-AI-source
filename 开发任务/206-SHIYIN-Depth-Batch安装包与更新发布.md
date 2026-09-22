@@ -9,7 +9,7 @@ TODO：
 - [x] 创建并接入魔塔 `SHIYIN-Depth-Batch` 仓库
 - [x] 编译、安装包检查和缓存上限检查
 最近验证：1.0.3 Rust `cargo check`、魔塔回退联网测试、批量界面 Node 9 项和 Python 7 项通过；Inno Setup 构建通过。公开目录签名、107,476,910 字节更新包 SHA-256 和 ZIP 内 13 个文件逐项校验通过。
-branch/commit：`feat/video-depth-batch-delivery` / 待提交
+branch/commit：`feat/video-depth-batch-delivery` / `c276b989`
 阻塞：无。
 
 [CODEX_LONG_TASK_CONTINUE_V3]

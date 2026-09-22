@@ -1,7 +1,7 @@
 {
   "name": "shiyin-ai-windows-desktop",
   "private": true,
-  "version": "2.0.3",
+  "version": "2.0.4",
   "scripts": {
     "canvas:engine-build": "esbuild src/canvas-engine-upstream/bridge.tsx --bundle --minify --format=iife --target=chrome110 --outfile=static/vendor/js/infinite-canvas-engine.js",
     "css:build": "node ./node_modules/tailwindcss/lib/cli.js -c tailwind.config.cjs -i ./static/css/tailwind-input.css -o ./static/vendor/css/tailwind.generated.css --minify",

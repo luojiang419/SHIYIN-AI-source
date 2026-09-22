@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "canvas-desktop"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "arboard",
  "ed25519-dalek",

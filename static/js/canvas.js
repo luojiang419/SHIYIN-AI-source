@@ -1828,11 +1828,12 @@ function bindKlingConnectionControls(wrap){
     };
 }
 const klingWebSendingNodes=new Set();
-async function fillKlingWebDraft(nodeId){
+async function fillKlingWebDraft(nodeId, autoSubmit=true){
     const node=nodes.find(item=>item.id===nodeId);
     if(!node || klingWebSendingNodes.has(nodeId)) return;
     klingWebSendingNodes.add(nodeId);
     try {
+        if(node.model && !isKlingOmni30Model(node.model)) throw new Error('网页自动生成目前支持视频 3.0 Omni，请先切换模型');
         let prompt, refs;
         if(node.type==='film-video'){
             const built=window.CanvasFilmNodes.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target=>connectedCanvasPromptTextForSubmission(target)});
@@ -1843,17 +1844,23 @@ async function fillKlingWebDraft(nodeId){
         }
         if(!String(prompt || '').trim()) throw new Error('请先输入提示词，再发送到可灵');
         const references=(refs || []).map(ref=>({url:ref.url,kind:mediaKindForRef(ref),name:ref.name || ''}));
-        const response=await fetch('/api/kling-web/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references,node_id:node.id})});
+        const response=await fetch('/api/kling-web/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references,node_id:node.id,auto_submit:autoSubmit,settings:{duration:Number(node.duration || 5),resolution:node.resolution || "1080p",aspect_ratio:node.aspectRatio || "16:9",generate_audio:Boolean(node.generateAudio)}})});
         const draft=await response.json();
         if(!response.ok) throw new Error(draft.detail || '发送草稿失败');
         node.klingWebDraftId=draft.id;
         scheduleSave();
-        setStatus('等待 Chrome 插件接收；请在插件中连接本机拾影地址（仅填充，不生成）');
+        const opened=await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}/open`,{method:'POST'});
+        if(!opened.ok){
+            const handoff=window.open(`/api/kling-web/connect#${encodeURIComponent(draft.ticket)}`,'_blank');
+            if(!handoff) throw new Error('浏览器阻止了交接窗口，请允许本站弹窗后重新发送');
+        }
+        setStatus('正在自动交给 Chrome：上传参考素材、同步参数并提交可灵');
         const deadline=Date.now()+330000;
         while(Date.now()<deadline){
             await new Promise(resolve=>setTimeout(resolve,2000));
             const result=await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`).then(async r=>{const data=await r.json();if(!r.ok) throw new Error(data.detail || '读取草稿状态失败');return data;});
-            if(result.status==='filled'){setStatus('可灵参考素材和提示词已填充，未提交生成');return;}
+            if(['filled','submitted'].includes(result.status)){setStatus(result.message);node.klingWebStatus=result.status;scheduleSave();return;}
+            if(result.status==='unknown') throw new Error(result.message);
             if(['failed','cancelled'].includes(result.status)) throw new Error(result.message || '填充失败');
         }
         await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`,{method:'DELETE'});
@@ -11710,6 +11717,7 @@ async function runFilmNode(nodeId, opts={}){
     if(window.CanvasFilmWorkflow?.isList(node)) return window.CanvasFilmWorkflow.request(node,'generate');
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
     if(node.type === 'film-storyboard') return runFilmStoryboardNode(node,opts);
+    if(node.type === 'film-video' && isKlingVideoNode(node) && isKlingOmni30Model(node.model)) return fillKlingWebDraft(nodeId,true);
     if(node.type === 'film-video' && isKlingVideoNode(node) && !await ensureKlingGenerationAvailable(opts)) return;
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptTextForSubmission(target)});
@@ -12091,7 +12099,7 @@ function renderNode(node){
     });
     if(node.type === 'film-video' && isKlingVideoNode(node)){
         ensureKlingCapabilities();
-        body.querySelector('.film-video-settings')?.insertAdjacentHTML('beforeend', klingConnectionPanelHtml()+`<button type="button" class="tool-btn" data-kling-web-fill="${escapeAttr(node.id)}">填充到可灵（不生成）</button>`);
+        body.querySelector('.film-video-settings')?.insertAdjacentHTML('beforeend', `<div class="muted-note">Chrome 网页自动填充并生成，无需 CLI 授权。</div><button type="button" class="tool-btn" data-kling-web-fill="${escapeAttr(node.id)}">发送到可灵并生成</button>`);
     }
     if(window.CanvasFilmWorkflow?.handles(node)) body.innerHTML = window.CanvasFilmWorkflow.bodyHtml(node);
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
@@ -15116,8 +15124,7 @@ function videoModelOptionsForNode(node){
     if(!isKlingVideoNode(node)) return videoModelOptions(node.model, node.apiProvider);
     const models = klingModelsForNode(node);
     if(!models.length){
-        const label = klingCliState.loading ? '正在读取模型…' : '连接后选择可灵模型';
-        return `<option value="" disabled selected>${label}</option>`;
+        return `<option value="${KLING_VIDEO_3_0_OMNI_MODEL}" selected>视频 3.0 Omni · Chrome 网页</option>`;
     }
     return models.map(item => {
         const alias = String(item.alias || '').split(',')[0].trim();
@@ -15182,7 +15189,7 @@ function klingConnectionPanelHtml(){
         </div>
     </div>`;
 }
-function klingVideoSettingsHtml(node){
+function klingCliVideoSettingsHtml(node){
     ensureKlingCapabilities();
     const mode = klingCapabilityModeForNode(node);
     const model = klingModelSpec(node);
@@ -15190,7 +15197,7 @@ function klingVideoSettingsHtml(node){
     const videoRefs = videoRefsOnly(orderedSources(node, generatorSources(node)).flatMap(source => source.refs || []));
     const videoReferenceNote = `<div class="muted-note kling-video-reference-warning">${videoRefs.length ? '视频参考可通过 Chrome 插件上传到可灵 Omni。' : '也可将图片和提示词发送到可灵网页。'}网页参数请在填充后核对。</div><button type="button" class="tool-btn" data-kling-web-fill="${escapeAttr(node.id)}">填充到可灵（不生成）</button>`;
     if(!klingCliState.authenticated || !model){
-        return `${klingConnectionPanelHtml()}${videoReferenceNote}<div class="muted-note">${escapeHtml(klingLoginState.busy ? '完成浏览器授权后会自动刷新可用模型。' : klingCliState.error || '连接账号后，模型参数会从可灵实时加载；无需安装 npm。')}</div>`;
+        return `${klingConnectionPanelHtml()}<div class="muted-note">${escapeHtml(klingLoginState.busy ? '完成浏览器授权后会自动刷新可用模型。' : klingCliState.error || '连接账号后，模型参数会从可灵实时加载；无需安装 npm。')}</div>`;
     }
     node.modelParameters = node.modelParameters && typeof node.modelParameters === 'object' ? node.modelParameters : {};
     const fields = (model.arguments || []).filter(argument => argument.name && argument.name !== 'prompt').map(argument => {
@@ -15215,7 +15222,17 @@ function klingVideoSettingsHtml(node){
             : `<input class="setting-input" data-kling-parameter="${escapeAttr(argument.name)}" value="${escapeAttr(value)}" ${argument.required ? 'required' : ''}>`;
         return `<label class="field kling-parameter-field"><div class="setting-title">${escapeHtml(videoParameterLabel(argument.name))}${argument.required ? ' *' : ''}</div>${control}${argument.description ? `<div class="kling-parameter-help">${escapeHtml(argument.description)}</div>` : ''}</label>`;
     }).join('');
-    return `${klingConnectionPanelHtml()}${videoReferenceNote}<div class="kling-mode-note">${modeLabel}</div><div class="kling-parameter-grid">${fields || '<div class="muted-note">当前模型没有额外参数</div>'}</div>`;
+    return `${klingConnectionPanelHtml()}<div class="kling-mode-note">${modeLabel}</div><div class="kling-parameter-grid">${fields || '<div class="muted-note">当前模型没有额外参数</div>'}</div>`;
+}
+function klingVideoSettingsHtml(node){
+    if(node.model && !isKlingOmni30Model(node.model)) return klingCliVideoSettingsHtml(node);
+    const fields=[
+        ['duration','时长',Array.from({length:13},(_,i)=>String(i+3)),String(node.duration || 5)],
+        ['resolution','分辨率',['720p','1080p','4K'],node.resolution || '1080p'],
+        ['aspect_ratio','比例',['16:9','9:16','1:1','auto'],node.aspectRatio || '16:9'],
+        ['enable_audio','音画同步',['true','false'],String(Boolean(node.generateAudio))]
+    ];
+    return `<div class="muted-note">可灵视频 3.0 Omni · Chrome 网页生成。首次安装插件后，任务将自动接收；无需 CLI 授权。</div><div class="kling-parameter-grid">${fields.map(([key,label,values,current])=>`<label class="field"><div class="setting-title">${label}</div><select class="select-lite" data-kling-parameter="${key}">${values.map(value=>`<option value="${value}" ${value===current?'selected':''}>${value==='true'?'开启':value==='false'?'关闭':value==='auto'?'智能':value}</option>`).join('')}</select></label>`).join('')}</div><button type="button" class="tool-btn" data-kling-web-fill="${escapeAttr(node.id)}">发送到可灵并生成</button>`;
 }
 function legacyVideoSettingsHtml(node){
     return `<div class="gen-settings-row">
@@ -17221,6 +17238,7 @@ async function runVideoNode(nodeId, opts={}){
     if(!node || (node.running && !opts.cascade && !['video','ecom-video'].includes(node.type))) return;
     const isH3 = isMiniMaxH3VideoNode(node);
     const isKling = isKlingVideoNode(node);
+    if(isKling && isKlingOmni30Model(node.model)) return fillKlingWebDraft(nodeId,true);
     if(isKling && !await ensureKlingGenerationAvailable(opts)) return;
     if(isYouyunH3VideoNode(node)){
         await loadYouyunH3Status();

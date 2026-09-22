@@ -340,6 +340,7 @@ PUBLIC_HTTP_PATHS = {
     "/favicon.ico",
     "/media-cache-sw.js",
     "/api/health",
+    "/api/kling-web/connect",
     "/api/account/login",
     "/api/account/register",
     "/api/auth/bootstrap",
@@ -411,7 +412,8 @@ def require_local_admin(request: Request) -> AccountIdentity:
 
 
 from canvas_core.kling_web_bridge import create_router as create_kling_web_router
-app.include_router(create_kling_web_router(request_identity))
+kling_web_router = create_kling_web_router(request_identity, lambda url: output_file_from_url(url))
+app.include_router(kling_web_router)
 
 
 @app.middleware("http")
@@ -419,6 +421,16 @@ async def account_authentication_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if request.method == "OPTIONS" or path in PUBLIC_HTTP_PATHS:
         return await call_next(request)
+    if path.startswith('/api/kling-web/transport/'):
+        try:
+            bridge_owner = kling_web_router.bridge_account(request)
+        except HTTPException as exc:
+            return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
+        bridge_context = set_current_account(bridge_owner)
+        try:
+            return await call_next(request)
+        finally:
+            reset_current_account(bridge_context)
     try:
         identity = await asyncio.to_thread(ACCOUNT_STORE.resolve_session, request_account_token(request))
     except sqlite3.OperationalError as error:

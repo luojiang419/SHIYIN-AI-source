@@ -1,6 +1,6 @@
 /* 只使用网页 DOM 与标准输入事件；不读取可灵 cookie、私有接口或框架内部状态。 */
 (() => {
-  if (window.ShiyinKlingAdapter) return;
+  if (window.ShiyinKlingAdapter?.version === '0.2.0') return;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const visible = el => !!el && el.getClientRects().length > 0;
   function editor() {
@@ -120,5 +120,69 @@
       return {status:'filled', ...result};
     } finally { busy = false; files.clear(); }
   }
-  window.ShiyinKlingAdapter = {beginFile, appendFile, upload, fillText, run, snapshot, prepare};
+  function unique(selector) {
+    const found=[...document.querySelectorAll(selector)].filter(visible);
+    if(found.length!==1) throw new Error(`可灵控件已变化：${selector}`);
+    return found[0];
+  }
+  function disabled(el){return el.disabled || el.getAttribute('aria-disabled')==='true' || el.classList.contains('disabled');}
+  function settingsSignature(){
+    return JSON.stringify({model:document.querySelector('.omni-setting-area .model')?.textContent,
+      selected:[...document.querySelectorAll('.omni-setting-popover .option-tab-item.active')].map(e=>e.className),
+      audio:document.querySelector('.has-native-audio svg')?.getAttribute('icon-name')});
+  }
+  async function configure(settings) {
+    if(!/视频\s*3\.0\s*Omni/i.test(unique('.omni-setting-area .model').innerText)) throw new Error('请在可灵选择视频 3.0 Omni，当前模型不匹配');
+    const trigger=unique('.omni-setting-area .setting-select');
+    if(![...document.querySelectorAll('.omni-setting-popover')].some(visible)) {trigger.click();await sleep(250);}
+    const select=async(group,label)=>{
+      const panel=unique('.omni-setting-popover');
+      const option=[...panel.querySelectorAll(`.${group} .option-tab-item`)].find(e=>e.querySelector('.inner')?.textContent.trim()===label);
+      if(!option || disabled(option)) throw new Error(`可灵当前不支持参数：${label}`);
+      if(!option.classList.contains('active')) {option.click();await sleep(200);}
+      if(!option.classList.contains('active')) throw new Error(`可灵参数未生效：${label}`);
+    };
+    await select('model_mode',settings.resolution);
+    await select('duration',`${settings.duration}s`);
+    await select('aspect_ratio',settings.aspect_ratio==='auto'?'智能':settings.aspect_ratio);
+    await select('imageCount','1');
+    trigger.click();await sleep(150);
+    const audio=unique('.has-native-audio');
+    const checked=()=>audio.querySelector('svg')?.getAttribute('icon-name')==='IconCheckboxCheckedSecondary';
+    if(checked()!==settings.generate_audio) {audio.click();await sleep(200);}
+    if(checked()!==settings.generate_audio) throw new Error('音画同步设置未生效');
+    completed.settings=settings;
+    completed.settingsSignature=settingsSignature();
+    return {configured:true};
+  }
+  const submittedIds=new Set();
+  function checkSubmit(id) {
+    if(!completed || completed.id!==id || completed.text!==editor().innerText || completed.pool!==poolSignature()) throw new Error('可灵草稿已被修改，停止自动生成');
+    if(!completed.settings) throw new Error('生成参数尚未校验');
+    if(completed.settingsSignature!==settingsSignature()) throw new Error('生成参数已被修改，停止自动生成');
+    if(submittedIds.has(id) || sessionStorage.getItem(`shiyin-kling-submit-${id}`)) throw new Error('该任务已经尝试生成，禁止重复点击');
+    const button=unique('.omni-designer__message-input-area button.button-pay');
+    if(disabled(button) || !/^生成/.test(button.innerText.trim())) throw new Error('可灵生成按钮尚不可用，请检查登录、额度和素材');
+    return {ready:true};
+  }
+  async function submit(id) {
+    checkSubmit(id);
+    const button=unique('.omni-designer__message-input-area button.button-pay');
+    const before=new Set([...document.querySelectorAll('.virtual-item[id]')].map(e=>e.id));
+    const text=completed.text.replace(/\s+/g,'');
+    // 在点击之前写入；点击后的任何错误都不能授权第二次点击。
+    sessionStorage.setItem(`shiyin-kling-submit-${id}`,'attempted');
+    submittedIds.add(id);
+    button.click();
+    const deadline=Date.now()+30000;
+    while(Date.now()<deadline){
+      await sleep(400);
+      const error=[...document.querySelectorAll('.el-message--error')].filter(visible).map(e=>e.innerText).join(' ');
+      if(error) return {status:'unknown',message:`可灵提示：${error}；请核对历史记录后再决定是否重发`};
+      const created=[...document.querySelectorAll('.virtual-item[id]')].find(e=>!before.has(e.id) && e.querySelector('.omni-stream-item') && e.querySelector('.prompt-display')?.innerText.replace(/\s+/g,'')===text);
+      if(created) return {status:'submitted',message:`已提交可灵生成，任务 ${created.id}；可在可灵查看生成进度`};
+    }
+    return {status:'unknown',message:'已点击生成，但未确认可灵任务回执。请查看可灵历史记录，勿重复提交。'};
+  }
+  window.ShiyinKlingAdapter = {version:'0.2.0',beginFile, appendFile, upload, fillText, run, snapshot, prepare,configure,checkSubmit,submit};
 })();

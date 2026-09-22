@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "拾影 · 可灵自动填充",
-  "version": "0.1.0",
-  "description": "接收拾影画布中的图片、视频和提示词，填充到可灵 Omni，不提交生成。",
+  "name": "拾影 · 可灵画布助手",
+  "version": "0.2.0",
+  "description": "自动接收桌面及 Web 画布任务，填充参考素材、提示词与参数并单次提交可灵生成。",
+  "content_scripts": [{"matches":["http://127.0.0.1/api/kling-web/connect*","http://localhost/api/kling-web/connect*"],"js":["handoff.js"],"run_at":"document_idle"}],
   "permissions": ["storage", "scripting", "alarms"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://klingai.com/*"],
   "background": {"service_worker": "background.js"},

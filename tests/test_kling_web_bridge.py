@@ -58,3 +58,46 @@ def test_atomic_claim_and_timeout_does_not_retry():
     queue.items[item['id']]['claimed_at'] = time.time() - 301
     assert queue.claim('one') is None
     assert queue.get('one', item['id'])['status'] == 'failed'
+
+
+def test_task_ticket_claim_and_single_submission_permission(client):
+    draft = client.post('/api/kling-web/drafts', json={'prompt': '一次生成', 'auto_submit': True}).json()
+    headers = {'Authorization': 'Bearer ' + draft['ticket'], 'x-test-account': 'different-browser'}
+    assert client.post('/api/kling-web/transport/claim').status_code == 401
+    claimed = client.post('/api/kling-web/transport/claim', headers=headers).json()['draft']
+    assert claimed['id'] == draft['id']
+    assert 'ticket' not in claimed
+    assert client.post('/api/kling-web/transport/claim', headers=headers).json()['draft'] is None
+    payload = {'lease': claimed['lease'], 'status': 'submitting'}
+    assert client.post('/api/kling-web/transport/submit-permit', headers=headers, json=payload).status_code == 200
+    assert client.post('/api/kling-web/transport/submit-permit', headers=headers, json=payload).status_code == 409
+    payload['status'] = 'submitted'
+    assert client.post('/api/kling-web/transport/result', headers=headers, json=payload).json()['status'] == 'submitted'
+    assert 'ticket' not in client.get('/api/kling-web/drafts/' + draft['id']).json()
+
+
+def test_fill_only_ticket_cannot_generate_or_read_other_media(client):
+    draft = client.post('/api/kling-web/drafts', json={'prompt': '只填充'}).json()
+    headers = {'Authorization': 'Bearer ' + draft['ticket']}
+    claimed = client.post('/api/kling-web/transport/claim', headers=headers).json()['draft']
+    assert client.post('/api/kling-web/transport/submit-permit', headers=headers,
+                       json={'lease': claimed['lease'], 'status': 'submitting'}).status_code == 409
+    assert client.get('/api/kling-web/transport/media/0', headers=headers).status_code == 403
+    assert client.get('/api/kling-web/transport/media/-1', headers=headers).status_code == 403
+
+
+def test_ticket_media_is_limited_to_claimed_task(tmp_path):
+    media = tmp_path / 'reference.png'
+    media.write_bytes(b'fixture')
+    app = FastAPI()
+    app.include_router(create_router(lambda request: SimpleNamespace(account_id='one'), lambda url: media))
+    client = TestClient(app)
+    draft = client.post('/api/kling-web/drafts', json={'prompt':'test', 'references':[{'url':'/assets/a.png','kind':'image'}]}).json()
+    headers = {'Authorization': 'Bearer ' + draft['ticket']}
+    assert client.get('/api/kling-web/transport/media/0', headers=headers).status_code == 403
+    claimed = client.post('/api/kling-web/transport/claim', headers=headers).json()['draft']
+    assert client.get('/api/kling-web/transport/media/0', headers=headers).content == b'fixture'
+    assert client.get('/api/kling-web/transport/media/1', headers=headers).status_code == 403
+    assert client.get('/api/kling-web/transport/media/0', headers={'Authorization':'Bearer wrong'}).status_code == 401
+    client.post('/api/kling-web/transport/result', headers=headers, json={'lease':claimed['lease'],'status':'filled'})
+    assert client.get('/api/kling-web/transport/media/0', headers=headers).status_code == 403

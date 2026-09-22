@@ -7,7 +7,7 @@ const fs=require('node:fs');
   try{
     const page=await browser.newPage({viewport:{width:1440,height:900}});
     const base=process.env.CUTOUT_TEST_URL||'http://127.0.0.1:8792';
-    await page.request.post(base+'/api/account/login',{data:{account:'jiang',password:'jiang'}});
+    await require('./account_test_login.cjs').loginForTest(page.request,base);
     const pixels=fs.readFileSync('generated-images/20260830-open-mannequin-refs/ref-01.png');
     const preview='data:image/png;base64,'+pixels.toString('base64');
     let failSegment=true,failExport=true,closed=0;

@@ -33,8 +33,8 @@ const {spawn} = require('node:child_process');
         const page = await browser.newPage({viewport:{width:1440,height:960}, acceptDownloads:true});
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
-        const login = await page.request.post(`${base}/api/account/login`, {data:{account:'jiang',password:'jiang'}});
-        assert.equal(login.status(),200, await login.text());
+        const login = await page.request.post(`${base}/api/account/register`, {data:{account:'工程包测试管理员',password:'测试自设密码'}});
+        assert.equal(login.status(),201, await login.text());
         // 由 Pillow 创建真实 PNG，避免测试资源不符合接收端的图片校验。
         const imageFile = path.join(work,'frame.png');
         const imageProcess = spawn(process.env.PYTHON || 'python', ['-c', 'from PIL import Image; import sys; Image.new("RGB", (160,90), "orange").save(sys.argv[1])',imageFile], {windowsHide:true});

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>登录 SHIYIN AI</title>
+  <title>账号设置 · SHIYIN AI</title>
   <style>
     :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color-scheme:light;background:#f3f0ea;color:#24211e}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 12%,#fff 0,#f3f0ea 48%,#e5ded3 100%)}
@@ -14,35 +14,62 @@
     label{display:block;margin-top:17px;font-size:13px;font-weight:650;color:#49423b}input{width:100%;margin-top:7px;padding:13px;border:1px solid #d4cabd;border-radius:11px;background:#fff;color:#24211e;font:inherit;outline:none}input:focus{border-color:#776a5b;box-shadow:0 0 0 3px rgba(119,106,91,.14)}
     button.submit{width:100%;margin-top:21px;padding:13px;border:0;border-radius:11px;background:#3b3732;color:#fff;font:700 15px/1.2 inherit;cursor:pointer}button:disabled{opacity:.55;cursor:wait}
     #message{min-height:22px;margin-top:13px;text-align:center}.error{color:#b42334}.success{color:#247449}.note{margin-top:20px;padding-top:16px;border-top:1px solid #e5ddd3;font-size:12px}
+    [hidden]{display:none!important}.intro{margin-top:24px}.intro h2{font-size:19px;margin:0 0 8px}.steps{font-size:12px;margin-top:12px;color:#746b61;line-height:1.8}.steps strong{color:#24211e}.notice{margin-top:12px;padding:12px;border-radius:10px;background:#f3f0ea}
+    @media(prefers-color-scheme:dark){:root{color-scheme:dark;color:#eee9e2;background:#171614}body{background:radial-gradient(circle at 50% 12%,#39332d 0,#201d19 48%,#171614 100%)}main{background:rgba(37,34,30,.94);border-color:#524b42}p,.steps{color:#c1b8ac}h1,.intro h2,.steps strong{color:#f5eee6}.tabs,.notice{background:#322e28}.tab{color:#c1b8ac}.tab.active{background:#50473d;color:#fff}label{color:#e4dbcf}input{background:#211e1a;border-color:#645a4d;color:#f5eee6}.note{border-color:#524b42}button.submit{background:#e7ded2;color:#28231d}.error{color:#ff9ba5}.success{color:#91d6a4}}
   </style>
 </head>
 <body>
   <main>
     <div class="brand"><div class="mark">S</div><div><h1>SHIYIN AI</h1><p>每个账号拥有独立的画布、素材和生成资源</p></div></div>
-    <div class="tabs"><button class="tab active" data-mode="login">登录</button><button class="tab" data-mode="register">自动注册</button></div>
+    <div class="intro"><h2 id="heading">设置你的账号</h2><p id="description">正在读取账号设置状态…</p></div>
+    <div class="steps" id="steps" hidden><strong>① 账号设置</strong> → ② 图片服务 → ③ AI助手 → ④ 保存方式</div>
+    <p class="notice" id="persistence">账号用于多人使用时的数据隔离，每个人的画布、素材和生成资源独立保存。</p>
+    <div class="tabs"><button class="tab active" data-mode="login" type="button">登录</button><button class="tab" data-mode="register" type="button">注册账号</button></div>
     <form id="form">
       <label>账号<input id="account" inputmode="text" autocomplete="username" required placeholder="中文、英文字母或数字"></label>
       <label>密码<input id="password" type="password" inputmode="text" autocomplete="current-password" required placeholder="任意字符，不能为空"></label>
-      <button class="submit" id="submit" type="submit">登录</button>
+      <label id="confirmLabel" hidden>确认密码<input id="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码"></label>
+      <button class="submit" id="submit" type="submit" disabled>正在准备…</button>
     </form>
     <p id="message" aria-live="polite"></p>
     <p class="note" id="note">输入已注册账号和密码，桌面端与 Web 均可登录所有账号；英文字母大小写视为同一账号。</p>
   </main>
   <script>
-    let mode='login';
+    let mode='login',setup={needs_setup:false,can_setup:false,persistent_login:false},ready=false;
     const form=document.getElementById('form'),account=document.getElementById('account'),password=document.getElementById('password'),submit=document.getElementById('submit'),message=document.getElementById('message'),note=document.getElementById('note');
-    document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
-      mode=tab.dataset.mode;document.querySelectorAll('.tab').forEach(item=>item.classList.toggle('active',item===tab));
-      submit.textContent=mode==='register'?'注册并进入':'登录';password.autocomplete=mode==='register'?'new-password':'current-password';
-      note.textContent=mode==='register'?'账号可使用中文、英文字母和数字；密码不限制长度或复杂度，但不能为空。注册后数据将保存到独立账户目录。':'输入已注册账号和密码，桌面端与 Web 均可登录所有账号；英文字母大小写视为同一账号。';message.textContent='';
-    }));
-    form.addEventListener('submit',async event=>{
-      event.preventDefault();submit.disabled=true;message.className='';message.textContent=mode==='register'?'正在创建独立账户…':'正在登录…';
+    const confirmation=document.getElementById('confirmPassword');
+    function renderMode(next){
+      mode=next;const registering=mode==='register',first=setup.needs_setup;
+      document.querySelectorAll('.tab').forEach(item=>{item.classList.toggle('active',item.dataset.mode===mode);item.disabled=!ready||(item.dataset.mode==='register'&&first&&!setup.can_setup)});
+      document.getElementById('heading').textContent=first?'欢迎使用，先设置账号':registering?'创建独立账号':'欢迎回来';
+      document.getElementById('description').textContent=first?'首次在软件本机注册的账号即为管理员，可配置 API 等敏感设置。':'管理员可以操作 API 配置等敏感设置，后续注册的账号为普通账号。';
+      document.getElementById('steps').hidden=!first||!setup.can_setup;
+      document.getElementById('persistence').textContent=setup.persistent_login?'账号密码只需在第一次使用时注册设置，软件会记住登录状态，后续启动无需再登录。主要用于多人使用时的数据隔离；主动退出或切换账号时才需重新登录。':'账号用于多人使用时的数据隔离。桌面软件首次登录后会记住账号，后续启动无需重复登录；浏览器会话到期后需重新登录。';
+      document.getElementById('confirmLabel').hidden=!registering;confirmation.required=registering;
+      submit.textContent=registering?(first?'创建管理员并继续':'注册并进入'):'登录并进入';
+      submit.disabled=!ready||(registering&&first&&!setup.can_setup);
+      password.autocomplete=registering?'new-password':'current-password';
+      note.textContent=first&&!setup.can_setup?'请先在安装软件的本机注册管理员账号，再使用其他设备注册或登录。':registering?'账号支持中文、英文字母和数字，英文字母不区分大小写。请自行设置并妥善保存密码。':'输入你设置的账号密码。需要多人使用时，可注册新账号分别保存数据。';
+      message.textContent='';
+    }
+    document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>renderMode(tab.dataset.mode)));
+    async function initialize(){
       try{
-        const response=await fetch(`/api/account/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:account.value,password:password.value})});
+        const response=await fetch('/api/account/setup',{cache:'no-store'});
+        if(!response.ok)throw new Error('无法读取账号设置，请刷新重试');
+        setup=await response.json();ready=true;renderMode(setup.needs_setup&&setup.can_setup?'register':'login');
+      }catch(error){message.className='error';message.textContent=error.message}
+    }
+    initialize();
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();if(!ready)return;
+      if(mode==='register'&&password.value!==confirmation.value){message.className='error';message.textContent='两次输入的密码不一致';confirmation.focus();return}
+      const submittedMode=mode;submit.disabled=true;document.querySelectorAll('.tab').forEach(tab=>tab.disabled=true);message.className='';message.textContent=mode==='register'?'正在创建账号…':'正在登录…';
+      try{
+        const response=await fetch(`/api/account/${submittedMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:account.value,password:password.value})});
         const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||`请求失败 (${response.status})`);
         message.className='success';message.textContent=mode==='register'?'注册成功，正在进入…':'登录成功，正在进入…';location.replace('/');
-      }catch(error){message.className='error';message.textContent=error.message||String(error);submit.disabled=false;password.select()}
+      }catch(error){renderMode(submittedMode);message.className='error';message.textContent=error.message||String(error);password.select()}
     });
   </script>
 </body>

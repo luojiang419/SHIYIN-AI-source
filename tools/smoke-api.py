@@ -62,7 +62,12 @@ def main() -> int:
         require_status(anonymous.get("/static/index.html"), 401, "Anonymous static page")
 
         require_status(
-            remote_admin.post("/api/account/login", json={"account": "jiang", "password": "jiang"}),
+            local_admin.post("/api/account/register", json={"account": "测试管理员", "password": "自设测试密码"}),
+            201,
+            "Initial local administrator setup",
+        )
+        require_status(
+            remote_admin.post("/api/account/login", json={"account": "测试管理员", "password": "自设测试密码"}),
             200,
             "Remote admin login",
         )
@@ -71,7 +76,7 @@ def main() -> int:
             raise AssertionError(f"Remote admin identity is incorrect: {remote_admin_me}")
         require_status(remote_admin.get("/api/admin/accounts"), 200, "Remote admin account management")
         require_status(
-            local_admin.post("/api/account/login", json={"account": "jiang", "password": "jiang"}),
+            local_admin.post("/api/account/login", json={"account": "测试管理员", "password": "自设测试密码"}),
             200,
             "Local admin login",
         )
@@ -114,9 +119,9 @@ def main() -> int:
             "Second account registration",
         )
         require_status(
-            anonymous.post("/api/account/register", json={"account": "JIANG", "password": "任意密码"}),
-            400,
-            "Reserved administrator account registration",
+            anonymous.post("/api/account/register", json={"account": "测试管理员", "password": "任意密码"}),
+            409,
+            "Duplicate administrator account registration",
         )
         user_one_identity = user_one.get("/api/account/me").json().get("account") or {}
         user_two_identity = user_two.get("/api/account/me").json().get("account") or {}

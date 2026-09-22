@@ -27,6 +27,7 @@ class AccountStorageTests(unittest.TestCase):
             unprotect=lambda value: bytes(value).decode("utf-8"),
         )
         store.initialize()
+        store.register("管理员", "测试密码")
         registry = AccountStorageRegistry(store, admin_layout, admin_database)
         return store, registry
 

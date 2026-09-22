@@ -40,7 +40,7 @@ class LanAccountAccessContractTests(unittest.TestCase):
         self.assertNotIn("input.inputMode='numeric'", self.admin)
 
     def test_all_accounts_can_login_from_web_and_user_config_is_hidden(self):
-        self.assertIn("create_admin_session", self.main)
+        self.assertIn("ACCOUNT_STORE.authenticate(payload.account, payload.password)", self.main)
         self.assertNotIn("管理员只能在安装软件的本机登录", self.accounts)
         self.assertNotIn("identity.is_admin and not is_loopback_address", self.main)
         self.assertIn('"/api/config"', self.main)

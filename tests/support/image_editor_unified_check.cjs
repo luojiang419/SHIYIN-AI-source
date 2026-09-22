@@ -9,7 +9,7 @@ const fs=require('node:fs');
   const base=process.env.CUTOUT_TEST_URL||'http://127.0.0.1:8792';
   // 仅屏蔽与本地编辑无关的首次 API Key 引导，不写入账号配置或伪造实际密钥。
   await page.route('**/api/providers',async route=>{const response=await route.fetch();const data=await response.json();data.providers=(data.providers||[]).map(p=>p.id==='shiying'?{...p,has_key:true}:p);await route.fulfill({response,json:data})});
-  await page.request.post(base+'/api/account/login',{data:{account:'jiang',password:'jiang'}});
+  await require('./account_test_login.cjs').loginForTest(page.request,base);
   const created=await (await page.request.post(base+'/api/canvases',{data:{title:'统一编辑器真实主壳测试'}})).json();
   const uploaded=await (await page.request.post(base+'/api/ai/upload',{multipart:{files:{name:'test.png',mimeType:'image/png',buffer:fs.readFileSync('generated-images/20260830-open-mannequin-refs/ref-01.png')}}})).json();
   await page.goto(base+'/static/index.html');

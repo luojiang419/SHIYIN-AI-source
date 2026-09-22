@@ -72,10 +72,10 @@ from canvas_core.auth import AuthManager, SESSION_COOKIE
 from canvas_core.accounts import (
     is_account_database_busy,
     ACCOUNT_SESSION_COOKIE,
-    ADMIN_ACCOUNT,
+    DESKTOP_COOKIE_TTL_SECONDS,
+    SESSION_TTL_SECONDS,
     AccountIdentity,
     account_lookup_key,
-    is_admin_account,
     is_loopback_address,
 )
 from canvas_core.account_storage import ScopedPath, current_account_id, reset_current_account, set_current_account
@@ -343,6 +343,7 @@ PUBLIC_HTTP_PATHS = {
     "/api/kling-web/connect",
     "/api/account/login",
     "/api/account/register",
+    "/api/account/setup",
     "/api/auth/bootstrap",
     "/api/runtime/shutdown",
     "/api/canvas-bridges/film/capabilities",
@@ -2992,17 +2993,31 @@ def auth_status(request: Request):
     return {"authenticated": True, "access_mode": "account", "account": identity.public()}
 
 
-def account_session_response(identity: AccountIdentity, token: str, status_code: int = 200):
-    response = JSONResponse({"ok": True, "account": identity.public()}, status_code=status_code)
+def account_session_response(identity: AccountIdentity, token: str, status_code: int = 200, *, persistent: bool = False, redirect: bool = False):
+    response = (RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
+                if redirect else JSONResponse({"ok": True, "account": identity.public()}, status_code=status_code))
     response.set_cookie(
         ACCOUNT_SESSION_COOKIE,
         token,
-        max_age=30 * 24 * 60 * 60 if not identity.is_admin else 12 * 60 * 60,
+        max_age=DESKTOP_COOKIE_TTL_SECONDS if persistent else SESSION_TTL_SECONDS,
         httponly=True,
         samesite="strict",
         path="/",
     )
     return response
+
+
+def is_desktop_account_request(request: Request) -> bool:
+    return RUNTIME_OPTIONS.mode == "desktop" and is_loopback_address(request_remote_address(request))
+
+
+@app.get("/api/account/setup")
+def account_setup_status(request: Request):
+    return JSONResponse({
+        "needs_setup": ACCOUNT_STORE.needs_setup(),
+        "can_setup": is_loopback_address(request_remote_address(request)),
+        "persistent_login": is_desktop_account_request(request),
+    }, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/account/register")
@@ -3011,36 +3026,39 @@ def register_account(payload: AccountCredentialsRequest, request: Request):
     key = f"register:{remote_address}:{account_lookup_key(payload.account)}"
     ACCOUNT_STORE.rate_limiter.check(key)
     try:
-        identity = ACCOUNT_STORE.register(payload.account, payload.password)
-        token = ACCOUNT_STORE.create_session(identity)
+        identity = ACCOUNT_STORE.register(payload.account, payload.password, allow_admin_setup=is_loopback_address(remote_address))
+        persistent = is_desktop_account_request(request)
+        token = ACCOUNT_STORE.create_session(identity, persistent=persistent)
+        if persistent:
+            ACCOUNT_STORE.remember_desktop_session(token)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         ACCOUNT_STORE.rate_limiter.fail(key)
         detail = str(exc)
         raise HTTPException(status_code=409 if "已存在" in detail else 400, detail=detail) from exc
     ACCOUNT_STORE.rate_limiter.success(key)
-    return account_session_response(identity, token, status_code=201)
+    return account_session_response(identity, token, status_code=201, persistent=persistent)
 
 
 @app.post("/api/account/login")
 def login_account(payload: AccountCredentialsRequest, request: Request):
     remote_address = request_remote_address(request)
-    admin_login = is_admin_account(payload.account)
     key = f"login:{remote_address}:{account_lookup_key(payload.account)}"
     ACCOUNT_STORE.rate_limiter.check(key)
     try:
-        if admin_login:
-            token = ACCOUNT_STORE.create_admin_session(payload.account, payload.password, remote_address)
-            identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
-        else:
-            identity = ACCOUNT_STORE.authenticate(payload.account, payload.password)
-            if not identity:
-                raise PermissionError("账号或密码错误")
-            token = ACCOUNT_STORE.create_session(identity)
+        identity = ACCOUNT_STORE.authenticate(payload.account, payload.password)
+        if not identity:
+            raise PermissionError("账号或密码错误")
+        persistent = is_desktop_account_request(request)
+        token = ACCOUNT_STORE.create_session(identity, persistent=persistent)
+        if persistent:
+            ACCOUNT_STORE.remember_desktop_session(token)
     except (PermissionError, ValueError) as exc:
         ACCOUNT_STORE.rate_limiter.fail(key)
-        raise HTTPException(status_code=403 if admin_login else 401, detail=str(exc)) from exc
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     ACCOUNT_STORE.rate_limiter.success(key)
-    return account_session_response(identity, token)
+    return account_session_response(identity, token, persistent=persistent)
 
 
 @app.get("/api/account/me")
@@ -3164,6 +3182,11 @@ def desktop_bootstrap(request: Request, token: str = ""):
     existing_identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
     if existing_identity:
         return RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
+
+    if RUNTIME_OPTIONS.mode == "desktop":
+        saved_token, saved_identity = ACCOUNT_STORE.desktop_session()
+        if saved_identity:
+            return account_session_response(saved_identity, saved_token, persistent=True, redirect=True)
 
     # 桌面模式只接受 loopback，启动页不再依赖 URL 中的一次性令牌，
     # 避免 WebView 恢复导航时重复消费令牌。源代码/浏览器模式仍保留令牌校验。

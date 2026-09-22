@@ -85,8 +85,8 @@ with TestClient(main.app, client=("127.0.0.1", 50000)) as client:
     assert len(main.DATABASE.list_canvases(include_deleted=False)) == 3
     assert main.load_canvas(unrelated["id"])["nodes"] == []
     # 不经过 mock 的 HTTP 工程包导出、重新导入和媒体读取。
-    login = client.post('/api/account/login', json={'account':'jiang','password':'jiang'})
-    assert login.status_code == 200, login.text
+    login = client.post('/api/account/register', json={'account':'桥接测试管理员','password':'测试自设密码'})
+    assert login.status_code == 201, login.text
     archive = client.get(f'/api/canvases/{first["canvas_id"]}/export-package')
     assert archive.status_code == 200, archive.text
     assert archive.content.startswith(b'PK')

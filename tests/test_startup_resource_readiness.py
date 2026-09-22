@@ -16,7 +16,7 @@ def test_resource_gate_runtime():
 def test_session_heartbeat_does_not_block_authentication_on_write_lock(tmp_path):
     store = AccountStore(tmp_path)
     store.initialize()
-    token = store.create_session(AccountIdentity('admin', 'jiang', 'admin', ''))
+    token = store.create_session(store.register('测试管理员', '自设密码'))
     with store.connect() as connection:
         connection.execute('UPDATE sessions SET last_seen_at=0')
     with store.connect() as writer:

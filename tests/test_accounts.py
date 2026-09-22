@@ -4,8 +4,6 @@ import unittest
 from pathlib import Path
 
 from canvas_core.accounts import (
-    ADMIN_ACCOUNT,
-    ADMIN_PASSWORD,
     AccountStore,
     LoginRateLimiter,
     account_lookup_key,
@@ -27,6 +25,7 @@ class AccountStoreTests(unittest.TestCase):
     def test_register_login_session_and_dedicated_folder(self):
         with tempfile.TemporaryDirectory() as root:
             store = self.make_store(root)
+            store.register("管理员", "自选密码")
             identity = store.register("用户AbC001", "任意 Password !@#")
             self.assertEqual(identity.account, "用户AbC001")
             self.assertTrue((Path(root) / "accounts" / identity.folder_name / "database").is_dir())
@@ -37,26 +36,35 @@ class AccountStoreTests(unittest.TestCase):
             store.logout(token)
             self.assertIsNone(store.resolve_session(token))
 
-    def test_admin_is_fixed_and_can_login_from_web_or_desktop(self):
+    def test_first_account_is_admin_and_has_no_builtin_password(self):
         with tempfile.TemporaryDirectory() as root:
             store = self.make_store(root)
-            token = store.create_admin_session(ADMIN_ACCOUNT, ADMIN_PASSWORD, "127.0.0.1")
-            self.assertTrue(store.resolve_session(token).is_admin)
-            remote_token = store.create_admin_session(ADMIN_ACCOUNT, ADMIN_PASSWORD, "192.168.1.20")
-            self.assertTrue(store.resolve_session(remote_token).is_admin)
+            self.assertTrue(store.needs_setup())
+            self.assertIsNone(store.authenticate("jiang", "jiang"))
             with self.assertRaises(PermissionError):
-                store.create_admin_session(ADMIN_ACCOUNT, "wrong", "127.0.0.1")
+                store.register("远端", "密码", allow_admin_setup=False)
+            admin = store.register("自选管理员", "自己的密码")
+            self.assertTrue(admin.is_admin)
+            self.assertEqual(admin.account_id, "admin")
+            self.assertEqual(store.account_layout(admin.account_id).root, Path(root).resolve())
+            self.assertFalse(store.needs_setup())
+            self.assertTrue(store.authenticate("自选管理员", "自己的密码").is_admin)
+            self.assertFalse(store.register("jiang", "非默认密码").is_admin)
+            self.assertIsNone(store.authenticate("jiang", "jiang"))
+            with self.assertRaisesRegex(ValueError, "不能禁用"):
+                store.update_account(admin.account_id, disabled=True)
 
     def test_admin_can_read_and_update_recoverable_password(self):
         with tempfile.TemporaryDirectory() as root:
             store = self.make_store(root)
+            store.register("管理员", "自选密码")
             identity = store.register("测试User8", "原 密码!@#")
             session = store.create_session(identity)
-            listed = store.list_accounts(include_passwords=True)
+            listed = [item for item in store.list_accounts(include_passwords=True) if item['id'] == identity.account_id]
             self.assertEqual(listed[0]["password"], "原 密码!@#")
             store.update_account(identity.account_id, account="新User88", password="新密码 A-a_123", disabled=True)
             self.assertIsNone(store.resolve_session(session))
-            updated = store.list_accounts(include_passwords=True)[0]
+            updated = next(item for item in store.list_accounts(include_passwords=True) if item['id'] == identity.account_id)
             self.assertEqual(
                 (updated["account"], updated["password"], updated["disabled"]),
                 ("新User88", "新密码 A-a_123", True),
@@ -79,15 +87,43 @@ class AccountStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_password("")
 
-    def test_duplicate_account_is_case_insensitive_and_admin_name_is_reserved(self):
+    def test_duplicate_account_is_case_insensitive_and_old_admin_name_is_available(self):
         with tempfile.TemporaryDirectory() as root:
             store = self.make_store(root)
             store.register("User用户1", "2")
             with self.assertRaisesRegex(ValueError, "账号已存在"):
                 store.register("uSER用户1", "3")
-            for reserved in ("jiang", "JIANG", "Jiang"):
-                with self.assertRaisesRegex(ValueError, "管理员专用"):
-                    store.register(reserved, "任意密码")
+            store.register("jiang", "任意密码")
+            with self.assertRaisesRegex(ValueError, "账号已存在"):
+                store.register("JIANG", "任意密码")
+
+    def test_persistent_session_survives_restart_and_revocation(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = self.make_store(root)
+            admin = store.register("持久账号", "密码")
+            token = store.create_session(admin, persistent=True)
+            store.remember_desktop_session(token)
+            with store.connect() as connection:
+                saved = connection.execute("SELECT * FROM desktop_login").fetchone()
+                self.assertNotEqual(saved['token_encrypted'], token.encode())
+                self.assertEqual(connection.execute("SELECT expires_at FROM sessions").fetchone()[0], 0)
+            restarted = self.make_store(root)
+            self.assertEqual(restarted.desktop_session(), (token, admin))
+            restarted.update_account(admin.account_id, password="新密码")
+            self.assertEqual(restarted.desktop_session(), ("", None))
+            token = restarted.create_session(admin, persistent=True)
+            restarted.remember_desktop_session(token)
+            restarted.logout(token)
+            self.assertEqual(self.make_store(root).desktop_session(), ("", None))
+
+    def test_concurrent_first_registration_has_exactly_one_admin(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with tempfile.TemporaryDirectory() as root:
+            stores = [self.make_store(root), self.make_store(root)]
+            with ThreadPoolExecutor(2) as pool:
+                results = list(pool.map(lambda pair: pair[1].register(f"账号{pair[0]}", "密码"), enumerate(stores)))
+            self.assertEqual(sum(item.is_admin for item in results), 1)
+            self.assertEqual(len({item.account_id for item in results}), 2)
 
     def test_existing_numeric_account_database_adds_case_insensitive_lookup_key(self):
         with tempfile.TemporaryDirectory() as root:
@@ -111,6 +147,12 @@ class AccountStoreTests(unittest.TestCase):
                     "INSERT INTO accounts VALUES(?,?,?,?,?,0,1,1,0)",
                     ("legacy-id", "001", _password_hash("7"), store._protect("7"), "legacy-folder"),
                 )
+                connection.execute("CREATE TABLE sessions(token_hash TEXT PRIMARY KEY,account_id TEXT,role TEXT,created_at INTEGER,expires_at INTEGER,last_seen_at INTEGER)")
+                from canvas_core.accounts import session_hash
+                connection.executemany("INSERT INTO sessions VALUES(?,?,?,1,9999999999999,1)", [
+                    (session_hash('old-admin'), 'admin', 'admin'),
+                    (session_hash('old-user'), 'legacy-id', 'user'),
+                ])
                 connection.commit()
             finally:
                 connection.close()
@@ -123,6 +165,25 @@ class AccountStoreTests(unittest.TestCase):
             self.assertIn("account_key", columns)
             self.assertEqual(account_key, "001")
             self.assertEqual(store.authenticate("001", "7").account_id, "legacy-id")
+            self.assertFalse(store.authenticate("001", "7").is_admin)
+            self.assertTrue(store.needs_setup())
+            self.assertTrue(store.register("新管理员", "新密码").is_admin)
+            self.assertIsNone(store.resolve_session('old-admin'))
+            self.assertEqual(store.resolve_session('old-user').account_id, 'legacy-id')
+            self.assertEqual(store.account_layout('legacy-id').root, Path(root).resolve() / 'accounts' / 'legacy-folder')
+
+    def test_web_session_expires_and_database_role_is_authoritative(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = self.make_store(root)
+            store.register('管理员', '密码')
+            user = store.register('普通用户', '密码')
+            token = store.create_session(user)
+            with store.connect() as connection:
+                connection.execute("UPDATE sessions SET role='admin'")
+            self.assertFalse(store.resolve_session(token).is_admin)
+            with store.connect() as connection:
+                connection.execute("UPDATE sessions SET expires_at=1")
+            self.assertIsNone(store.resolve_session(token))
 
     def test_loopback_detection_covers_ipv4_ipv6_and_mapped_ipv4(self):
         self.assertTrue(is_loopback_address("127.0.0.1"))

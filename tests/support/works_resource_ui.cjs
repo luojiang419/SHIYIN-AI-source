@@ -5,7 +5,7 @@ const base='http://127.0.0.1:3052';
  const browser=await chromium.launch({headless:true,channel:'msedge'});
  try{
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
-  await context.request.post(base+'/api/account/login',{data:{account:'jiang',password:'jiang'}});
+  await require('./account_test_login.cjs').loginForTest(context.request,base);
   const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const work={id:'test',name:'SHIYIN-000001-20260910.jpg',original_name:'fixture-0.jpg',url:'/assets/output/fixture-0.jpg',preview_url:'/api/media-preview?w=512&url=%2Fassets%2Foutput%2Ffixture-0.jpg',resource_status:'local',media_type:'image',created_at:1700000000};
   await page.route('**/api/works?*',async route=>{

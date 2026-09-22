@@ -35,7 +35,7 @@
       <div class="brand"><div class="mark">S</div><div class="title"><h1>局域网账号管理</h1><p>仅限管理员账号访问</p></div></div>
       <div class="head-actions"><a class="btn" href="/">返回工作台</a><button class="btn danger" id="logoutBtn" type="button">退出管理员</button></div>
     </header>
-    <div class="notice">管理员可以查看和修改普通用户的原账号、原密码及启用状态。账号可使用中文、英文字母和数字，英文字母大小写视为同一账号；密码不限制长度或复杂度，但不能为空。修改密码后，该用户已登录的设备会立即退出，需要使用新密码重新登录。</div>
+    <div class="notice">首次在本机注册的账号为管理员，可修改账号密码和管理普通用户。管理员账号不能禁用。账号支持中文、英文字母和数字，英文字母不区分大小写；密码不能为空。修改密码后，该账号的登录状态会失效，需要使用新密码重新登录。</div>
     <section class="panel model-panel">
       <div class="panel-head"><h2>DWPose 本地模型</h2><span id="dwposeState">正在检查</span></div>
       <div class="model-body">
@@ -117,13 +117,13 @@
         const accountField=field('账号（中文、英文字母或数字）',account.account);
         const passwordField=field('原密码（可直接修改）',account.password);
         const actions=el('div','row-actions');
-        const toggle=el('label','toggle'); const disabled=document.createElement('input'); disabled.type='checkbox'; disabled.checked=!!account.disabled;
+        const toggle=el('label','toggle'); const disabled=document.createElement('input'); disabled.type='checkbox'; disabled.checked=!!account.disabled; disabled.disabled=account.role==='admin';
         toggle.append(disabled,document.createTextNode(' 禁用'));
         const save=el('button','mini primary','保存'); save.type='button';
         const resources=el('button','mini','查看资源'); resources.type='button';
         const copy=el('button','mini','复制账号密码'); copy.type='button';
         actions.append(toggle,save,resources,copy);
-        const meta=el('div','account-meta',`注册：${formatTime(account.created_at)} · 最后登录：${formatTime(account.last_login_at)} · 数据目录：accounts/${account.folder_name}`);
+        const meta=el('div','account-meta',`${account.role==='admin'?'管理员':'普通账号'} · 注册：${formatTime(account.created_at)} · 最后登录：${formatTime(account.last_login_at)} · 数据目录：${account.role==='admin'?'本机原有数据目录':`accounts/${account.folder_name}`}`);
         save.onclick=async()=>{
           const payload={disabled:disabled.checked};
           if(accountField.input.value!==account.account) payload.account=accountField.input.value;

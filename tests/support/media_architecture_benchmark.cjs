@@ -10,7 +10,7 @@ fs.mkdirSync(output,{recursive:true});
     for(const [variant,port] of [['baseline',3051],['current',3052]]){
       const context=await browser.newContext({viewport:{width:1440,height:1000}});
       const base=`http://127.0.0.1:${port}`;
-      const login=await context.request.post(base+'/api/account/login',{data:{account:'jiang',password:'jiang'}});
+      const login=await require('./account_test_login.cjs').loginForTest(context.request,base);
       assert.equal(login.status(),200);
       const api=[];
       for(const surface of ['works','canvas']){

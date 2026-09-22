@@ -3,7 +3,7 @@ const {chromium}=require('playwright');
 const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
 const page=await browser.newPage({viewport:{width:1600,height:1000}});
 page.on('pageerror',e=>console.log('PAGE ERROR',e.message));
-await page.request.post('http://127.0.0.1:8792/api/account/login',{data:{account:'jiang',password:'jiang'}});
+await require('./account_test_login.cjs').loginForTest(page.request,'http://127.0.0.1:8792');
 const created=await (await page.request.post('http://127.0.0.1:8792/api/canvases',{data:{title:'抠像集成测试'}})).json();
 await page.goto('http://127.0.0.1:8792/static/canvas.html?id='+created.canvas.id);
 await page.waitForTimeout(2500);

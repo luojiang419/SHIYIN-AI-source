@@ -19,10 +19,9 @@ from .secrets import default_secret_protector
 
 
 ACCOUNT_SESSION_COOKIE = "canvas_account_session"
-ADMIN_ACCOUNT = "jiang"
-ADMIN_PASSWORD = "jiang"
 MAX_ACCOUNT_CHARS = 4096
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+DESKTOP_COOKIE_TTL_SECONDS = 400 * 24 * 60 * 60
 
 
 def is_account_database_busy(error: sqlite3.OperationalError) -> bool:
@@ -63,8 +62,6 @@ def validate_account(value: str, label: str = "账号") -> str:
         raise ValueError(f"{label}不能超过 {MAX_ACCOUNT_CHARS} 个字符")
     if not all((character.isascii() and character.isalnum()) or _is_chinese_character(character) for character in text):
         raise ValueError(f"{label}只能包含中文、英文字母和数字")
-    if account_lookup_key(text) == account_lookup_key(ADMIN_ACCOUNT):
-        raise ValueError(f"{label} {ADMIN_ACCOUNT} 为管理员专用")
     return text
 
 
@@ -73,10 +70,6 @@ def validate_password(value: str, label: str = "密码") -> str:
     if not text:
         raise ValueError(f"{label}不能为空")
     return text
-
-
-def is_admin_account(value: str) -> bool:
-    return account_lookup_key(value) == account_lookup_key(ADMIN_ACCOUNT)
 
 
 def is_loopback_address(value: str) -> bool:
@@ -237,6 +230,11 @@ class AccountStore:
                     last_seen_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+                CREATE TABLE IF NOT EXISTS desktop_login (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    token_hash TEXT NOT NULL,
+                    token_encrypted BLOB NOT NULL
+                );
                 """
             )
             account_columns = {
@@ -244,6 +242,10 @@ class AccountStore:
             }
             if "account_key" not in account_columns:
                 connection.execute("ALTER TABLE accounts ADD COLUMN account_key TEXT NOT NULL DEFAULT ''")
+            if "role" not in account_columns:
+                connection.execute("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+                # 旧版管理员是虚拟身份，不能把固定密码产生的会话迁移成新管理员。
+                connection.execute("DELETE FROM sessions WHERE role='admin'")
             existing_keys: dict[str, str] = {}
             for row in connection.execute("SELECT id,account,account_key FROM accounts ORDER BY created_at,id"):
                 key = account_lookup_key(str(row["account"]))
@@ -254,7 +256,12 @@ class AccountStore:
                 if str(row["account_key"] or "") != key:
                     connection.execute("UPDATE accounts SET account_key=? WHERE id=?", (key, row["id"]))
             connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_account_key ON accounts(account_key)")
-            connection.execute("DELETE FROM sessions WHERE expires_at<?", (now_ms(),))
+            connection.execute("DELETE FROM sessions WHERE expires_at>0 AND expires_at<?", (now_ms(),))
+            connection.execute("DELETE FROM sessions WHERE account_id NOT IN (SELECT id FROM accounts)")
+
+    def needs_setup(self) -> bool:
+        with self.connect() as connection:
+            return not bool(connection.execute("SELECT 1 FROM accounts WHERE role='admin'").fetchone())
 
     def account_layout(self, account_id: str) -> DataLayout:
         if account_id == "admin":
@@ -264,7 +271,7 @@ class AccountStore:
             raise KeyError("账号不存在")
         return DataLayout.from_root(self.accounts_root / str(record["folder_name"]))
 
-    def register(self, account: str, password: str) -> AccountIdentity:
+    def register(self, account: str, password: str, *, allow_admin_setup: bool = True) -> AccountIdentity:
         clean_account = validate_account(account)
         clean_password = validate_password(password)
         clean_account_key = account_lookup_key(clean_account)
@@ -273,10 +280,18 @@ class AccountStore:
         timestamp = now_ms()
         with self._lock, self.connect() as connection:
             try:
+                # 跨进程串行判断与插入，防止两个首次注册同时获得管理员权限。
+                connection.execute("BEGIN IMMEDIATE")
+                first = not connection.execute("SELECT 1 FROM accounts WHERE role='admin'").fetchone()
+                if first and not allow_admin_setup:
+                    raise PermissionError("请先在安装软件的本机设置管理员账号")
+                role = "admin" if first else "user"
+                if first:
+                    account_id, folder_name = "admin", ""
                 connection.execute(
                     """INSERT INTO accounts(
-                           id,account,account_key,password_hash,password_encrypted,folder_name,disabled,created_at,updated_at,last_login_at
-                       ) VALUES(?,?,?,?,?,?,0,?,?,0)""",
+                           id,account,account_key,password_hash,password_encrypted,folder_name,disabled,created_at,updated_at,last_login_at,role
+                       ) VALUES(?,?,?,?,?,?,0,?,?,0,?)""",
                     (
                         account_id,
                         clean_account,
@@ -286,13 +301,15 @@ class AccountStore:
                         folder_name,
                         timestamp,
                         timestamp,
+                        role,
                     ),
                 )
+                connection.commit()
             except sqlite3.IntegrityError as exc:
                 raise ValueError("账号已存在，请直接登录") from exc
-        layout = DataLayout.from_root(self.accounts_root / folder_name)
+        layout = self.account_layout(account_id)
         layout.ensure()
-        return AccountIdentity(account_id, clean_account, "user", folder_name)
+        return AccountIdentity(account_id, clean_account, role, folder_name)
 
     def authenticate(self, account: str, password: str) -> Optional[AccountIdentity]:
         clean_account = validate_account(account)
@@ -303,12 +320,12 @@ class AccountStore:
             if not row or int(row["disabled"] or 0) or not _password_matches(clean_password, row["password_hash"]):
                 return None
             connection.execute("UPDATE accounts SET last_login_at=? WHERE id=?", (now_ms(), row["id"]))
-        return AccountIdentity(str(row["id"]), str(row["account"]), "user", str(row["folder_name"]))
+        return AccountIdentity(str(row["id"]), str(row["account"]), str(row["role"]), str(row["folder_name"]))
 
-    def create_session(self, identity: AccountIdentity, ttl_seconds: int = SESSION_TTL_SECONDS) -> str:
+    def create_session(self, identity: AccountIdentity, ttl_seconds: int = SESSION_TTL_SECONDS, *, persistent: bool = False) -> str:
         token = secrets.token_urlsafe(32)
         timestamp = now_ms()
-        expires_at = timestamp + max(60, int(ttl_seconds)) * 1000
+        expires_at = 0 if persistent else timestamp + max(60, int(ttl_seconds)) * 1000
         with self.connect() as connection:
             connection.execute(
                 "INSERT INTO sessions(token_hash,account_id,role,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?,?)",
@@ -323,20 +340,17 @@ class AccountStore:
         timestamp = now_ms()
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM sessions WHERE token_hash=?", (digest,)).fetchone()
-            if not row or int(row["expires_at"] or 0) < timestamp:
+            if not row or (int(row["expires_at"]) > 0 and int(row["expires_at"]) < timestamp):
                 if row:
                     connection.execute("DELETE FROM sessions WHERE token_hash=?", (digest,))
                 return None
-            if str(row["role"]) == "admin":
-                identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
-            else:
-                account = connection.execute("SELECT * FROM accounts WHERE id=?", (row["account_id"],)).fetchone()
-                if not account or int(account["disabled"] or 0):
-                    connection.execute("DELETE FROM sessions WHERE token_hash=?", (digest,))
-                    return None
-                identity = AccountIdentity(
-                    str(account["id"]), str(account["account"]), "user", str(account["folder_name"])
-                )
+            account = connection.execute("SELECT * FROM accounts WHERE id=?", (row["account_id"],)).fetchone()
+            if not account or int(account["disabled"] or 0):
+                connection.execute("DELETE FROM sessions WHERE token_hash=?", (digest,))
+                return None
+            identity = AccountIdentity(
+                str(account["id"]), str(account["account"]), str(account["role"]), str(account["folder_name"])
+            )
             if timestamp - int(row["last_seen_at"] or 0) >= 60_000:
                 # 心跳不参与授权判定；不能让并发媒体请求争抢写锁导致有效会话报错。
                 connection.execute("PRAGMA busy_timeout=0")
@@ -353,13 +367,27 @@ class AccountStore:
     def logout(self, token: str) -> None:
         with self.connect() as connection:
             connection.execute("DELETE FROM sessions WHERE token_hash=?", (session_hash(token),))
+            connection.execute("DELETE FROM desktop_login WHERE token_hash=?", (session_hash(token),))
 
-    def create_admin_session(self, account: str, password: str, _remote_address: str = "") -> str:
-        if not hmac.compare_digest(str(account or ""), ADMIN_ACCOUNT) or not hmac.compare_digest(
-            str(password or ""), ADMIN_PASSWORD
-        ):
-            raise PermissionError("管理员账号或密码错误")
-        return self.create_session(AccountIdentity("admin", ADMIN_ACCOUNT, "admin", ""), ttl_seconds=12 * 60 * 60)
+    def remember_desktop_session(self, token: str) -> None:
+        encrypted = self._protect(token)
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO desktop_login(id,token_hash,token_encrypted) VALUES(1,?,?)",
+                (session_hash(token), encrypted),
+            )
+
+    def desktop_session(self) -> tuple[str, Optional[AccountIdentity]]:
+        with self.connect() as connection:
+            row = connection.execute("SELECT token_encrypted FROM desktop_login WHERE id=1").fetchone()
+        if not row:
+            return "", None
+        try:
+            token = self._unprotect(bytes(row["token_encrypted"]))
+        except (ValueError, OSError, RuntimeError):
+            return "", None
+        identity = self.resolve_session(token)
+        return (token, identity) if identity else ("", None)
 
     def account_by_id(self, account_id: str) -> Optional[dict[str, object]]:
         with self.connect() as connection:
@@ -374,6 +402,7 @@ class AccountStore:
             item = {
                 "id": str(row["id"]),
                 "account": str(row["account"]),
+                "role": str(row["role"]),
                 "disabled": bool(row["disabled"]),
                 "created_at": int(row["created_at"]),
                 "updated_at": int(row["updated_at"]),
@@ -393,6 +422,8 @@ class AccountStore:
         password: Optional[str] = None,
         disabled: Optional[bool] = None,
     ) -> dict[str, object]:
+        if account_id == "admin" and disabled:
+            raise ValueError("不能禁用唯一的管理员账号")
         updates: list[str] = []
         values: list[object] = []
         if account is not None:

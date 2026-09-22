@@ -78,7 +78,7 @@ try:
         assert receive.json()["workflow_ready"] is True
         assert all(n.get("workflowScriptId") == "script-p" for n in canvas["nodes"] if n.get("workflowKey"))
         assert calls[0]["action"] == "sync", "backend initializes without opening any canvas page"
-        assert client.post('/api/account/login', json={'account': 'jiang', 'password': 'jiang'}).status_code == 200
+        assert client.post('/api/account/register', json={'account': '工作流测试管理员', 'password': '测试自设密码'}).status_code == 201
         prepare = next(n for n in canvas["nodes"] if n["type"] == "film-prepare-assets")
         response = client.post("/api/canvas-film-workflow", json={"canvas_id": canvas["id"], "node_id": prepare["id"], "action": "sync", "graph": canvas})
         assert response.status_code == 200, response.text

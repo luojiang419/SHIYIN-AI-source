@@ -1,13 +1,22 @@
 from fastapi.testclient import TestClient
+from contextlib import contextmanager
+from tempfile import TemporaryDirectory
+from pathlib import Path
+from unittest.mock import patch
+from canvas_core.accounts import AccountStore
 
 import main
 
 
+@contextmanager
 def authenticated_client():
-    client = TestClient(main.app, client=("127.0.0.1", 50112))
-    identity = main.AccountIdentity("admin", main.ADMIN_ACCOUNT, "admin", "")
-    client.cookies.set(main.ACCOUNT_SESSION_COOKIE, main.ACCOUNT_STORE.create_session(identity))
-    return client
+    with TemporaryDirectory() as root:
+        store = AccountStore(Path(root))
+        store.initialize()
+        identity = store.register("测试管理员", "测试密码")
+        with patch.object(main, 'ACCOUNT_STORE', store), TestClient(main.app, client=("127.0.0.1", 50112)) as client:
+            client.cookies.set(main.ACCOUNT_SESSION_COOKIE, store.create_session(identity))
+            yield client
 
 
 def test_html_and_service_worker_do_not_reuse_stale_page_shells():

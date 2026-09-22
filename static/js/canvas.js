@@ -15226,6 +15226,9 @@ function klingCliVideoSettingsHtml(node){
 }
 function klingVideoSettingsHtml(node){
     if(node.model && !isKlingOmni30Model(node.model)) return klingCliVideoSettingsHtml(node);
+    if(!['720p','1080p','4K'].includes(node.resolution)) node.resolution='720p';
+    if(!['16:9','9:16','1:1','auto'].includes(node.aspectRatio)) node.aspectRatio='16:9';
+    node.duration=Math.max(3,Math.min(15,Number(node.duration) || 5));
     const fields=[
         ['duration','时长',Array.from({length:13},(_,i)=>String(i+3)),String(node.duration || 5)],
         ['resolution','分辨率',['720p','1080p','4K'],node.resolution || '1080p'],

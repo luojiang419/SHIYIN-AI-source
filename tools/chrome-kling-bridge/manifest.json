@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "拾影 · 可灵画布助手",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "自动接收桌面及 Web 画布任务，填充参考素材、提示词与参数并单次提交可灵生成。",
   "content_scripts": [{"matches":["http://127.0.0.1/api/kling-web/connect*","http://localhost/api/kling-web/connect*"],"js":["handoff.js"],"run_at":"document_idle"}],
   "permissions": ["storage", "scripting", "alarms"],

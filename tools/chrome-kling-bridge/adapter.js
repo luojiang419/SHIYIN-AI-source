@@ -1,6 +1,6 @@
 /* 只使用网页 DOM 与标准输入事件；不读取可灵 cookie、私有接口或框架内部状态。 */
 (() => {
-  if (window.ShiyinKlingAdapter?.version === '0.3.0') return;
+  if (window.ShiyinKlingAdapter?.version === '0.3.1') return;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const visible = el => !!el && el.getClientRects().length > 0;
   function editor() {
@@ -161,6 +161,19 @@
     const checked=()=>audio.querySelector('svg')?.getAttribute('icon-name')==='IconCheckboxCheckedSecondary';
     if(checked()!==settings.generate_audio) {audio.click();await sleep(200);}
     if(checked()!==settings.generate_audio) throw new Error('音画同步设置未生效');
+    // 参数变化会异步刷新报价；等待稳定报价后才允许提交。
+    const priceDeadline=Date.now()+15000;
+    let lastPrice='', stableSince=0;
+    while(Date.now()<priceDeadline){
+      const pay=unique('.omni-designer__message-input-area button.button-pay');
+      const price=pay.querySelector('.price .value')?.textContent.trim() || '';
+      if(!disabled(pay) && /^\d+(?:\.\d+)?$/.test(price)){
+        if(price!==lastPrice){lastPrice=price;stableSince=Date.now();}
+        if(Date.now()-stableSince>=1500) break;
+      } else {lastPrice='';stableSince=0;}
+      await sleep(250);
+    }
+    if(!lastPrice || Date.now()-stableSince<1500) throw new Error('可灵生成报价尚未就绪，未点击生成');
     completed.settings=settings;
     completed.settingsSignature=settingsSignature();
     return {configured:true};
@@ -172,7 +185,7 @@
     if(completed.settingsSignature!==settingsSignature()) throw new Error('生成参数已被修改，停止自动生成');
     if(submittedIds.has(id) || sessionStorage.getItem(`shiyin-kling-submit-${id}`)) throw new Error('该任务已经尝试生成，禁止重复点击');
     const button=unique('.omni-designer__message-input-area button.button-pay');
-    if(disabled(button) || !/^生成/.test(button.innerText.trim())) throw new Error('可灵生成按钮尚不可用，请检查登录、额度和素材');
+    if(disabled(button) || !/(?:^|\s)生成$/.test(button.innerText.trim())) throw new Error('可灵生成按钮尚不可用，请检查登录、额度和素材');
     return {ready:true};
   }
   async function submit(id) {
@@ -194,5 +207,5 @@
     }
     return {status:'unknown',message:'已点击生成，但未确认可灵任务回执。请查看可灵历史记录，勿重复提交。'};
   }
-  window.ShiyinKlingAdapter = {version:'0.3.0',beginFile, appendFile, upload, fillText, run, snapshot, prepare,configure,checkSubmit,submit};
+  window.ShiyinKlingAdapter = {version:'0.3.1',beginFile, appendFile, upload, fillText, run, snapshot, prepare,configure,checkSubmit,submit};
 })();

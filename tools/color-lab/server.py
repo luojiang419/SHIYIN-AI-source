@@ -1,7 +1,7 @@
 """本机面料验证台，独立于安装版；python tools/color-lab/server.py。"""
 import sys, json, base64, io, os, uuid
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import numpy as np
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[2]
@@ -48,4 +48,4 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:self.send({'error':str(exc)},400)
 if __name__=='__main__':
     print('面料验证台 http://127.0.0.1:13229',flush=True)
-    HTTPServer(('127.0.0.1',13229),Handler).serve_forever()
+    ThreadingHTTPServer(('127.0.0.1',13229),Handler).serve_forever()

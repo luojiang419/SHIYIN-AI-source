@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import urllib.request
+import urllib.error
 
 from distribution.service import DEFAULT_DATA, atomic_json
 from distribution.desktop_settings import apply_titlebar, resolve_dark, set_startup, startup_enabled
@@ -33,9 +34,37 @@ class ServiceWatchdog:
 
 def launch_service():
     cmd = [sys.executable, '--service'] if getattr(sys, 'frozen', False) else [sys.executable, '-m', 'distribution.launcher', '--service']
+    env = os.environ.copy()
+    if getattr(sys, 'frozen', False):
+        env['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
     return subprocess.Popen(cmd, cwd=Path(__file__).resolve().parents[1],
-        creationflags=0x08000008 if os.name == 'nt' else 0,
+        env=env, creationflags=0x08000000 if os.name == 'nt' else 0,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def probe_service(request):
+    try:
+        return request('health')
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        return request('status')
+
+
+def wait_for_service(request, process, timeout=60):
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            probe_service(request)
+            return
+        except Exception as exc:
+            last_error = exc
+        code = process.poll()
+        if code is not None:
+            raise RuntimeError(f'分发服务进程退出（代码 {code}）。日志：{DEFAULT_DATA / "service-startup.log"}；连接错误：{last_error}')
+        time.sleep(.2)
+    raise RuntimeError(f'分发服务在 {timeout} 秒内未就绪。日志：{DEFAULT_DATA / "service-startup.log"}；连接错误：{last_error}')
 
 
 def main():
@@ -49,8 +78,8 @@ def main():
         return
     if '--service' in sys.argv:
         sys.argv.remove('--service')
-        from distribution.service import main as service_main
-        return service_main()
+        from distribution.startup import run_service
+        return run_service()
 
     token_path = DEFAULT_DATA / 'admin-token'
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -65,19 +94,13 @@ def main():
 
     def ready():
         try:
-            request()
+            probe_service(request)
             return True
         except Exception:
             return False
 
     if not ready():
-        launch_service()
-        for _ in range(100):
-            if ready():
-                break
-            time.sleep(.2)
-        else:
-            raise RuntimeError('分发服务未启动，请检查 3013 端口和数据目录权限')
+        wait_for_service(request, launch_service())
 
     guard = socket.socket()
     try:
@@ -90,7 +113,7 @@ def main():
 
     import webview
     import pystray
-    from PIL import Image, ImageDraw
+    from PIL import Image
 
     config = request()['settings']
     hide_on_start = '--background' in sys.argv or ('--startup' in sys.argv and config.get('start_hidden', True))
@@ -153,10 +176,7 @@ def main():
     def desktop_loop():
         nonlocal config, tray, theme_status, hwnd
         watchdog = ServiceWatchdog()
-        image = Image.new('RGBA', (64, 64), (20, 35, 30, 255))
-        drawing = ImageDraw.Draw(image)
-        drawing.polygon([(32, 9), (55, 32), (32, 55), (9, 32)], outline=(128, 226, 168), width=5)
-        drawing.line([(22, 36), (32, 24), (42, 36)], fill=(220, 250, 230), width=4)
+        image = Image.open(Path(__file__).parent / 'assets' / 'distribution.png').convert('RGBA')
         tray = pystray.Icon('SHIYINDistributionCenter', image, 'SHIYIN 分发中心', menu=pystray.Menu(
             pystray.MenuItem('打开控制面板', restore, default=True),
             pystray.MenuItem('隐藏到后台', background),
@@ -199,7 +219,7 @@ def main():
                 tray.stop()
 
     try:
-        webview.start(desktop_loop)
+        webview.start(desktop_loop, icon=str(Path(__file__).parent / 'assets' / 'distribution.ico'))
     finally:
         quitting.set()
         guard.close()

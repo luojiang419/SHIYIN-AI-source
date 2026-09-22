@@ -30,6 +30,16 @@ DEPTH_BATCH_ROOTS = ('SHIYIN-Depth-Batch.exe', 'worker', 'worker-overlays', 'scr
 MAX_SERVICE_LOGS = 1000
 
 
+class ExclusiveHTTPServer(ThreadingHTTPServer):
+    """Windows 禁止两个服务抢占同一个监听地址。"""
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if os.name == 'nt':
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def digest(path):
     with Path(path).open('rb') as handle:
         return hashlib.file_digest(handle, 'sha256').hexdigest()
@@ -245,7 +255,7 @@ class Center:
         with self.lock:
             if self.server:
                 return
-            server = ThreadingHTTPServer(('0.0.0.0', int(self.config['port'])), self.handler(False))
+            server = ExclusiveHTTPServer(('0.0.0.0', int(self.config['port'])), self.handler(False))
             server.daemon_threads = True
             self.server = server
             threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -634,14 +644,17 @@ class Center:
                         if path.startswith('/api/bug-reports/'):
                             if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
                             return self.json(owner.bug_report(path.rsplit('/', 1)[-1]))
+                        if path == '/api/health':
+                            if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
+                            return self.json({'ok': True})
                         if path == '/api/status':
                             if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
                             return self.json(owner.status())
-                        if path in ('/', '/panel.js', '/panel.css'):
-                            name = {'/': 'panel.html', '/panel.js': 'panel.js', '/panel.css': 'panel.css'}[path]
+                        if path in ('/', '/panel.js', '/panel.css', '/distribution.png'):
+                            name = {'/': 'panel.html', '/panel.js': 'panel.js', '/panel.css': 'panel.css', '/distribution.png': 'assets/distribution.png'}[path]
                             raw = (Path(__file__).parent / name).read_bytes()
                             self.send_response(200)
-                            self.send_header('Content-Type', {'/': 'text/html; charset=utf-8', '/panel.js': 'text/javascript', '/panel.css': 'text/css'}[path])
+                            self.send_header('Content-Type', {'/': 'text/html; charset=utf-8', '/panel.js': 'text/javascript', '/panel.css': 'text/css', '/distribution.png': 'image/png'}[path])
                             self.send_header('Content-Length', str(len(raw)))
                             self.send_header('Cache-Control', 'no-store')
                             self.end_headers()
@@ -808,7 +821,7 @@ def main():
     parser.add_argument('--admin-port', type=int, default=3013)
     args = parser.parse_args()
     center = Center(args.data, args.port, args.admin_port)
-    admin = ThreadingHTTPServer(('127.0.0.1', args.admin_port), center.handler(True))
+    admin = ExclusiveHTTPServer(('127.0.0.1', args.admin_port), center.handler(True))
     admin.daemon_threads = True
     if center.config['auto_start']:
         try: center.start()

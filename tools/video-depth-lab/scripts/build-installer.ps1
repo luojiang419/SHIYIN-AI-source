@@ -37,4 +37,12 @@ $iconFile = Join-Path $labRoot 'src-tauri\icons\icon.ico'
 if (-not (Test-Path -LiteralPath $iconFile -PathType Leaf)) { throw "Installer icon not found: $iconFile" }
 & $iscc "/DAppVersion=$version" "/DSourceRoot=$stage" "/DOutputRoot=$projectRoot\dist\installer" "/DIconFile=$iconFile" "$labRoot\installer\SHIYIN-Depth-Batch.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed.' }
-Get-FileHash -LiteralPath (Join-Path $projectRoot "dist\installer\SHIYIN-Depth-Batch-Setup-$version.exe") -Algorithm SHA256
+$installer = Join-Path $projectRoot "dist\installer\SHIYIN-Depth-Batch-Setup-$version.exe"
+$stream = [IO.File]::OpenRead($installer)
+try {
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try { $hash = ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha256.Dispose() }
+}
+finally { $stream.Dispose() }
+[PSCustomObject]@{ Algorithm = 'SHA256'; Hash = $hash; Path = $installer }

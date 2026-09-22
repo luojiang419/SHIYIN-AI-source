@@ -1,14 +1,14 @@
 # SHIYIN-Depth-Batch 安装包与更新发布
 
-状态：1.0.2 安装包和魔塔签名更新已发布，更新发现与下载链路验证通过。
-下一步：用户安装 1.0.2 后点击检查更新，现场确认独立更新器关闭、替换和重启的界面体验。
+状态：1.0.3 更新器修复版和魔塔签名验证更新已发布；公开清单、下载、签名及逐文件校验通过。
+下一步：用户用 1.0.3 安装包覆盖旧版，再点击检查更新，确认 UAC 授权、替换和重启体验。
 TODO：
 - [x] 取消便携包构建入口，提供 Windows 安装器
 - [x] 接入签名增量更新与独立更新进程
 - [x] 分发中心按产品隔离深度批量工具更新
 - [x] 创建并接入魔塔 `SHIYIN-Depth-Batch` 仓库
 - [x] 编译、安装包检查和缓存上限检查
-最近验证：1.0.2 Rust `cargo check`、魔塔回退联网测试及批量界面 Node 5 项通过；Inno Setup 构建通过。公开目录签名、107,476,054 字节更新包 SHA-256 和 ZIP 内 13 个文件逐项校验通过。
+最近验证：1.0.3 Rust `cargo check`、魔塔回退联网测试、批量界面 Node 9 项和 Python 7 项通过；Inno Setup 构建通过。公开目录签名、107,476,910 字节更新包 SHA-256 和 ZIP 内 13 个文件逐项校验通过。
 branch/commit：`feat/video-depth-batch-delivery` / 待提交
 阻塞：无。
 
@@ -44,3 +44,12 @@ branch/commit：`feat/video-depth-batch-delivery` / 待提交
 - 更新成功后写入 `data/update/installed.json` 并清除 `pending.json`，再次检查不会重复提示同一更新。
 - 修复独立更新脚本使用 `Copy-Item -LiteralPath` 搭配通配符导致不能复制的问题，改为 `-Path`；更新完成后再启动新程序。
 - 魔塔增量包：`updates/20260922103240/SHIYIN-Depth-Batch-Update-20260922103240.shiyin-update`，SHA-256 `1e6bcc582db7f68a754abb67a19a8f3e3aa6c0895e2efb4240177df866d9295e`。
+
+## 1.0.3 更新器修复
+
+- 用户现场的“更新清单无效”来自未包含魔塔回退的新宿主；1.0.3 为更新请求增加 JSON `Accept`、固定 User-Agent、BOM 兼容，以及局域网和魔塔两路的独立诊断信息。
+- 更新下载、暂存、设置和状态从受保护的安装目录迁移到 `%LOCALAPPDATA%\SHIYIN-Depth-Batch`，同时兼容读取旧设置。
+- 独立更新器在覆盖 `D:\Program Files\SHIYIN-Depth-Batch` 前通过 UAC 请求管理员权限；失败时写入 `apply-error.log` 并显示提示。
+- 安装包：`dist/installer/SHIYIN-Depth-Batch-Setup-1.0.3.exe`，107,698,783 字节，SHA-256 `4dd0c6dbf7a7b473aca9f97e4b59395274260416a8d836db20dc0c7b825dcbf7`。
+- 安装基线序号为 `20260922105200`；公开验证更新序号为 `20260922105810`。
+- 魔塔验证更新包：107,476,910 字节，SHA-256 `4441bb33ef1cda92159ae8d5df8abe5f02f03b7738f850364e522eac903a795b`；公开下载后已验证 Ed25519 签名、整包 SHA-256 和 13 个 ZIP 文件哈希。

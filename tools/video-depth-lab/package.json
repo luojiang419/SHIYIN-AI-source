@@ -1,7 +1,7 @@
 {
   "name": "shiyin-video-depth-lab",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "GemDepth 与 Video Depth Anything 本地视频深度技术验证工具",
   "type": "module",
   "scripts": {

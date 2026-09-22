@@ -11,7 +11,7 @@ function updatePending(change) {
 }
 async function api(base, path, options={}, ticket='') {
   const response = await fetch(base + '/api/kling-web' + path, {
-    ...options, credentials:'include', headers:{'Content-Type':'application/json', ...(ticket?{Authorization:`Bearer ${ticket}`}:{})}, signal:AbortSignal.timeout(15000)
+    ...options, credentials:'include', headers:{'Content-Type':'application/json', 'X-Shiyin-Extension-Version':chrome.runtime.getManifest().version, ...(ticket?{Authorization:`Bearer ${ticket}`}:{})}, signal:AbortSignal.timeout(15000)
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || `服务返回 ${response.status}`);
@@ -125,19 +125,30 @@ async function tick() {
 }
 chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='kling-poll') void tick();});
 async function start(){await chrome.alarms.create('kling-poll',{periodInMinutes:0.5});void tick();}
-chrome.runtime.onInstalled.addListener(start);
+async function reconnectPages(){
+  await start();
+  const permissions=await chrome.permissions.getAll();
+  const matches=['http://127.0.0.1/api/kling-web/connect*','http://localhost/api/kling-web/connect*',
+    ...(permissions.origins || []).filter(o=>o.startsWith('https://') && !o.includes('klingai.com')).map(o=>o.replace(/\*$/, 'api/kling-web/connect*'))];
+  for(const tab of await chrome.tabs.query({url:matches})) {
+    try { await chrome.scripting.executeScript({target:{tabId:tab.id},files:['handoff.js']}); } catch {}
+  }
+}
+chrome.runtime.onInstalled.addListener(()=>void reconnectPages());
 chrome.runtime.onStartup.addListener(start);
 chrome.runtime.onMessage.addListener((msg,sender,respond)=>{
   if(msg?.type==='handoff' && sender.id===chrome.runtime.id) {
     (async()=>{
       const source=new URL(sender.url);
-      if(!['127.0.0.1','localhost'].includes(source.hostname) || source.protocol!=='http:' || source.pathname!=='/api/kling-web/connect' || !/^[\w-]{40,60}$/.test(msg.ticket)) throw Error('交接来源无效');
-      await updatePending(pending=>pending.some(x=>x.ticket===msg.ticket)?pending:[...pending,{base:source.origin,ticket:msg.ticket}]);
+      const local=source.protocol==='http:' && ['127.0.0.1','localhost'].includes(source.hostname);
+      const granted=source.protocol==='https:' && await chrome.permissions.contains({origins:[source.origin+'/*']});
+      if(!(local || granted) || source.pathname!=='/api/kling-web/connect' || !/^[\w-]{40,60}$/.test(msg.ticket)) throw Error('交接来源无效');
       try {
         const registered=await api(source.origin,'/transport/channel',{method:'POST'},msg.ticket);
         const saved=await chrome.storage.local.get('channels');
         await chrome.storage.local.set({channels:[...(saved.channels || []).filter(x=>x.base!==source.origin),{base:source.origin,token:registered.channel}]});
-      } catch { /* 旧后端仍可使用单任务交接。 */ }
+      } catch(error) { await updatePending(pending=>pending.filter(x=>x.ticket!==msg.ticket)); throw error; }
+      await updatePending(pending=>pending.some(x=>x.ticket===msg.ticket)?pending:[...pending,{base:source.origin,ticket:msg.ticket}]);
       await chrome.storage.local.set({base:source.origin,enabled:true,lastStatus:'已自动接收画布任务'});
       await chrome.alarms.create('kling-poll',{periodInMinutes:0.5});
       respond({ok:true});

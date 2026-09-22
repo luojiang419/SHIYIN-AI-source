@@ -1,5 +1,7 @@
 """账号隔离的可灵网页任务与单次提交许可。"""
 import copy
+import re
+import html
 import secrets
 import time
 import os
@@ -14,6 +16,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
+from .kling_extension_page import CONNECT_HTML
 
 
 class WebReference(BaseModel):
@@ -53,6 +56,8 @@ class DraftQueue:
         for key, item in list(self.items.items()):
             if now - item["created_at"] > 3600:
                 del self.items[key]
+            elif item["status"] == "queued" and now - item["created_at"] > 900:
+                item.update(status="cancelled", message="等待安装或连接已超过15分钟，请回画布重新发送")
             elif item["status"] == "filling" and now - item["claimed_at"] > 300:
                 item.update(status="failed", message="插件连接中断，请检查网页后重新填充；不会自动重试")
             elif item['status'] == 'submitting' and now - item['submit_at'] > 90:
@@ -119,6 +124,7 @@ def create_router(identity, resolve_media=None):
     router = APIRouter(prefix="/api/kling-web", tags=["kling-web"])
     queue = DraftQueue()
     channels = {}
+    observed_versions = {}
 
     def channel_item(request):
         token = request.headers.get('authorization', '').removeprefix('Bearer ')
@@ -158,12 +164,18 @@ def create_router(identity, resolve_media=None):
     @router.post('/transport/channel')
     async def channel_register(request: Request):
         item = ticket_item(request)
+        if item['status'] != 'queued':
+            raise HTTPException(409, '任务已接收或取消，请返回画布查看结果')
+        version = request.headers.get('x-shiyin-extension-version', '')
+        observed_versions[item['owner']] = {'version': version, 'seen': time.time()}
+        if not compatible(version):
+            raise HTTPException(426, '请更新可灵画布助手至0.4.0或更高版本')
         now = time.time()
         for token, channel in list(channels.items()):
             if channel['expires'] < now or channel['owner'] == item['owner']:
                 del channels[token]
         token = secrets.token_urlsafe(32)
-        channels[token] = {'owner': item['owner'], 'seen': now, 'expires': now + 86400}
+        channels[token] = {'owner': item['owner'], 'seen': now, 'expires': now + 86400, 'version': version}
         return {'channel': token}
 
     @router.post('/transport/poll')
@@ -174,13 +186,56 @@ def create_router(identity, resolve_media=None):
             item = next((x for x in queue.items.values() if x['owner'] == owner and x['status'] == 'queued'), None)
             return {'ticket': item['ticket'] if item else None}
 
+    def compatible(version):
+        parts = str(version).split('.')
+        return len(parts) == 3 and all(p.isdigit() for p in parts) and tuple(map(int, parts)) >= (0, 4, 0)
+
+    def distribution():
+        extension_id = os.environ.get('SHIYIN_KLING_EXTENSION_ID', '')
+        valid = bool(re.fullmatch(r'[a-p]{32}', extension_id))
+        return {'minimum_version': '0.4.0', 'extension_id': extension_id if valid else '',
+                'store_url': f'https://chromewebstore.google.com/detail/{extension_id}' if valid else ''}
+
+    @router.get('/connection')
+    async def connection(request: Request):
+        owner = identity(request).account_id
+        live = [c for c in channels.values() if c['owner'] == owner and c['expires'] > time.time() and time.time()-c['seen'] < 75]
+        recent = observed_versions.get(owner, {})
+        if time.time()-recent.get('seen', 0) >= 75: recent = {}
+        current = max(live, key=lambda c:c['seen'], default=recent)
+        return {**distribution(), 'state': ('connected' if compatible(current.get('version')) else 'outdated') if current else 'disconnected',
+                'version': current.get('version', '')}
+
     @router.get('/connect', response_class=HTMLResponse)
     async def connect():
-        return HTMLResponse('<!doctype html><meta charset="utf-8"><title>拾影 · 可灵任务交接</title><h2>正在交给可灵插件…</h2><p id="status">请保持 Chrome 中的可灵账号已登录。若此页未自动关闭，请在 Chrome 扩展管理中刷新拾影可灵插件至最新版。</p>', headers={'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer'})
+        page = CONNECT_HTML
+        page = page.replace('__STORE_URL__', html.escape(distribution()['store_url'], quote=True))
+        return HTMLResponse(page, headers={'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer',
+            'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"})
+
+    @router.get('/transport/status')
+    async def transport_status(request: Request):
+        item = ticket_item(request)
+        return {'status': item['status'], 'message': item['message']}
+
+    @router.post('/transport/cancel')
+    async def cancel_wait(request: Request):
+        item = ticket_item(request)
+        with queue.lock:
+            if item['status'] != 'queued':
+                raise HTTPException(409, '任务已经被接收，请查看画布状态')
+            item.update(status='cancelled', message='已取消安装等待，未提交生成')
+        return {'status': 'cancelled'}
+
+    @router.get('/drafts/{key}/resume')
+    async def resume(key: str, request: Request):
+        with queue.lock:
+            item = queue.get(identity(request).account_id, key)
+            return {**queue.public(item), 'ticket': item['ticket'] if item['status'] == 'queued' else ''}
 
     @router.post('/drafts/{key}/open')
     async def open_chrome(key: str, request: Request):
-        if request.client.host not in {'127.0.0.1', '::1', 'testclient'}:
+        if request.client.host not in {'127.0.0.1', '::1', 'testclient'} or request.url.hostname not in {'127.0.0.1', 'localhost', 'testserver'}:
             raise HTTPException(403, '远程 Web 请在当前浏览器打开交接页')
         item = queue.get(identity(request).account_id, key)
         port = request.url.port or 80
@@ -200,7 +255,7 @@ def create_router(identity, resolve_media=None):
             subprocess.Popen([chrome, '--new-window', '--start-minimized', url],
                              startupinfo=startup, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        connected = any(c['owner'] == item['owner'] and c['expires'] > time.time() and time.time()-c['seen'] < 75 for c in channels.values())
+        connected = any(c['owner'] == item['owner'] and c['expires'] > time.time() and time.time()-c['seen'] < 75 and compatible(c.get('version')) for c in channels.values())
         if connected:
             async def fallback():
                 await asyncio.sleep(40)
@@ -216,6 +271,8 @@ def create_router(identity, resolve_media=None):
     async def ticket_claim(request: Request):
         with queue.lock:
             item = ticket_item(request)
+            if not compatible(request.headers.get('x-shiyin-extension-version', '')):
+                raise HTTPException(426, '请更新可灵画布助手至0.4.0或更高版本')
             if item['status'] != 'queued':
                 return {'draft': None}
             return {'draft': queue.claim(item['owner'])}

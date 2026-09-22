@@ -1832,6 +1832,7 @@ async function fillKlingWebDraft(nodeId, autoSubmit=true){
     const node=nodes.find(item=>item.id===nodeId);
     if(!node || klingWebSendingNodes.has(nodeId)) return;
     klingWebSendingNodes.add(nodeId);
+    let setupDialog;
     try {
         if(node.model && !isKlingOmni30Model(node.model)) throw new Error('网页自动生成目前支持视频 3.0 Omni，请先切换模型');
         let prompt, refs;
@@ -1844,21 +1845,51 @@ async function fillKlingWebDraft(nodeId, autoSubmit=true){
         }
         if(!String(prompt || '').trim()) throw new Error('请先输入提示词，再发送到可灵');
         const references=(refs || []).map(ref=>({url:ref.url,kind:mediaKindForRef(ref),name:ref.name || ''}));
+        let draft;
+        if(node.klingWebDraftId){
+            const previous=await fetch(`/api/kling-web/drafts/${encodeURIComponent(node.klingWebDraftId)}/resume`);
+            if(!previous.ok && previous.status!==404) throw new Error('无法确认上次任务状态，请稍后重新连接，未创建新任务');
+            if(previous.ok){
+                const existing=await previous.json();
+                if(existing.status==='unknown') throw new Error('上次生成结果未确认，请先核对可灵历史记录，勿重复提交');
+                if(['queued','filling','submitting'].includes(existing.status)) draft=existing;
+            }
+        }
+        if(!draft){
         const response=await fetch('/api/kling-web/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references,node_id:node.id,auto_submit:autoSubmit,settings:{duration:Number(node.duration || 5),resolution:node.resolution || "1080p",aspect_ratio:node.aspectRatio || "16:9",generate_audio:Boolean(node.generateAudio)}})});
-        const draft=await response.json();
+        draft=await response.json();
         if(!response.ok) throw new Error(draft.detail || '发送草稿失败');
+        }
         node.klingWebDraftId=draft.id;
         scheduleSave();
-        const opened=await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}/open`,{method:'POST'});
+        const handoffUrl=`/api/kling-web/connect#${encodeURIComponent(draft.ticket)}`;
+        const opened=draft.status==='queued' ? await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}/open`,{method:'POST'}) : {ok:true};
         if(!opened.ok){
-            const handoff=window.open(`/api/kling-web/connect#${encodeURIComponent(draft.ticket)}`,'_blank');
-            if(!handoff) throw new Error('浏览器阻止了交接窗口，请允许本站弹窗后重新发送');
+            setStatus('请打开连接助手，在当前 Chrome 中接收任务');
         }
         setStatus('正在自动交给 Chrome：上传参考素材、同步参数并提交可灵');
-        const deadline=Date.now()+330000;
+        const started=Date.now(), deadline=started+1200000;
+        const showSetup=async()=>{
+            if(setupDialog) return;
+            setupDialog=document.createElement('dialog');
+            setupDialog.className='kling-account-dialog';
+            setupDialog.innerHTML='<div class="kling-account-content"><h3>连接可灵画布助手</h3><p role="status">正在等待扩展连接，不代表尚未安装。请使用登录可灵的 Chrome 配置。</p><p>原任务已保留，安装并连接后自动继续；15分钟未连接会取消。</p><a data-connect target="_blank" rel="noopener noreferrer">打开连接与安装助手</a><button data-cancel>取消本次任务</button><button data-close>收起</button></div>';
+            setupDialog.querySelector('[data-connect]').href=handoffUrl;
+            setupDialog.querySelector('[data-close]').onclick=()=>setupDialog.close();
+            setupDialog.querySelector('[data-cancel]').onclick=async()=>{
+                const response=await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`,{method:'DELETE'});
+                if(response.ok) setupDialog.close();
+                else setupDialog.querySelector('[role=status]').textContent='任务已被接收，请等待结果，勿重复提交。';
+            };
+            document.body.appendChild(setupDialog);setupDialog.showModal();
+            try{const response=await fetch('/api/kling-web/connection');if(response.ok){const info=await response.json();if(info.state==='outdated')setupDialog.querySelector('[role=status]').textContent=`扩展版本过旧，请更新至 ${info.minimum_version}。`;}}catch{}
+        };
+        if(!opened.ok) await showSetup();
         while(Date.now()<deadline){
             await new Promise(resolve=>setTimeout(resolve,2000));
             const result=await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`).then(async r=>{const data=await r.json();if(!r.ok) throw new Error(data.detail || '读取草稿状态失败');return data;});
+            if(result.status==='queued' && Date.now()-started>10000) await showSetup();
+            if(result.status!=='queued' && setupDialog?.open) setupDialog.close();
             if(['filled','submitted'].includes(result.status)){setStatus(result.message);node.klingWebStatus=result.status;scheduleSave();return;}
             if(result.status==='unknown') throw new Error(result.message);
             if(['failed','cancelled'].includes(result.status)) throw new Error(result.message || '填充失败');
@@ -1866,7 +1897,7 @@ async function fillKlingWebDraft(nodeId, autoSubmit=true){
         await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`,{method:'DELETE'});
         throw new Error('未收到插件填充结果，请检查 Chrome 插件连接和可灵页面');
     } catch(error){showErrorModal(error.message || String(error),'可灵网页填充');}
-    finally{klingWebSendingNodes.delete(nodeId);}
+    finally{setupDialog?.remove();klingWebSendingNodes.delete(nodeId);}
 }
 async function ensureKlingGenerationAvailable(opts={}){
     if(!klingCliState.loaded && !klingCliState.loading) await loadKlingCapabilities();

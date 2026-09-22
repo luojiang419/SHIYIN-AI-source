@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "component": "cutout-runtime",
+  "version": "1.0.0",
+  "enabled": true,
+  "message": "点击抠图运行时尚未安装，将在首次使用时自动下载",
+  "license_notice": "SAM: Apache-2.0; PyTorch: BSD-style licenses.",
+  "required_free_bytes": 11406604454,
+  "command": [
+    "runtime/ready.marker"
+  ],
+  "required_paths": [
+    "runtime/ready.marker",
+    "models/sam-vit-base/config.json",
+    "models/sam-vit-base/model.safetensors"
+  ],
+  "packages": [
+    {
+      "id": "windows-x64",
+      "size": 5703302227,
+      "sha256": "176a6fdbb987abfc391d5845380237ddfbad5a09d508c04c769357ff42a8c75c",
+      "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-cutout-runtime/resolve/master/shiyin-cutout-runtime-1.0.0-windows-x64.zip",
+      "official_url": ""
+    }
+  ]
+}

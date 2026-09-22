@@ -16,6 +16,35 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from distribution.service import atomic_json, digest, DEFAULT_DATA
 
+DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION = '2.0.4'
+
+
+def version_tuple(value):
+    if not re.fullmatch(r'\d+\.\d+\.\d+', value):
+        raise ValueError('桌面版本格式无效')
+    return tuple(map(int, value.split('.')))
+
+
+def assert_active_client_compatibility(status, minimum_version):
+    minimum = version_tuple(minimum_version)
+    incompatible = []
+    for client in status.get('clients', []):
+        desktop = str(client.get('version') or '').split('/', 1)[0].strip()
+        if re.fullmatch(r'\d+\.\d+\.\d+', desktop) and version_tuple(desktop) < minimum:
+            incompatible.append(desktop)
+    if incompatible:
+        versions = ', '.join(sorted(set(incompatible)))
+        raise ValueError(f'已联网客户端仍使用 {versions}，不能发布最低桌面版本为 {minimum_version} 的热更新；请先发布兼容更新或显式声明不兼容升级。')
+
+
+def distribution_status(admin_port, token):
+    request = urllib.request.Request(
+        f'http://127.0.0.1:{admin_port}/api/status',
+        headers={'Authorization': 'Bearer ' + token},
+    )
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=15) as response:
+        return json.load(response)
+
 
 def fingerprint(paths):
     h = hashlib.sha256()
@@ -37,16 +66,16 @@ def main():
     parser.add_argument('--web-only', action='store_true')
     parser.add_argument('--bootstrap', action='store_true', help='只发布兼容旧客户端的桌面更新器')
     parser.add_argument('--updater-only', action='store_true', help='发布新版客户端可用的更新器修复小包')
+    parser.add_argument('--allow-incompatible-clients', action='store_true', help='允许高于已联网客户端宿主版本的不兼容升级')
     parser.add_argument('--admin-port', type=int, default=3013)
     parser.add_argument(
         '--min-desktop-version',
-        default=(ROOT/'VERSION').read_text().strip(),
+        default=DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION,
         help='可应用此热更新的最低桌面宿主版本',
     )
     args=parser.parse_args()
     if len(args.version)!=14 or not args.version.isdigit(): raise ValueError('热更新版本需14位时间戳')
-    if not re.fullmatch(r'\d+\.\d+\.\d+', args.min_desktop_version):
-        raise ValueError('最低桌面宿主版本格式无效')
+    version_tuple(args.min_desktop_version)
     cache=ROOT/'.build/hot-build.json'
     state=json.loads(cache.read_text('utf-8')) if cache.exists() else {}
     desktop_files=list((ROOT/'src-tauri/src').rglob('*.rs'))+list((ROOT/'src-tauri').glob('*.toml'))+list((ROOT/'src-tauri').glob('*.json'))+list((ROOT/'desktop-placeholder').rglob('*'))+[ROOT/'src-tauri/distribution-public-key.hex',ROOT/'src-tauri/build.rs']
@@ -114,10 +143,13 @@ def main():
     atomic_json(cache,state)
     if args.publish:
         token=(DEFAULT_DATA/'admin-token').read_text('ascii')
+        if not args.allow_incompatible_clients:
+            assert_active_client_compatibility(distribution_status(args.admin_port, token), args.min_desktop_version)
         kind='hot-bootstrap' if args.bootstrap else 'hot-updater' if args.updater_only else 'hot'
         body=json.dumps({'source':str(snapshot),'kind':kind,'notes':args.notes}).encode()
         request=urllib.request.Request(f'http://127.0.0.1:{args.admin_port}/api/import',data=body,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request,timeout=15) as response: response.read()
+    run(['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File','tools/clean-development-cache.ps1'])
     print(json.dumps({'snapshot':str(snapshot),'files':len(manifest['files']),'version':args.version,'publish_requested':args.publish},ensure_ascii=False))
 
 

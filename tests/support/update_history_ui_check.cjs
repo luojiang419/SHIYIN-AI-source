@@ -1,0 +1,48 @@
+const {chromium}=require('playwright');
+const fs=require('fs');
+const assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:1100,height:900}});
+ const styles=[...fs.readFileSync('static/index.html','utf8').matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(x=>x[1]).join('\n');
+ let mode='ok';
+ await page.route('http://timeline.test/**',async route=>{
+  const path=new URL(route.request().url()).pathname;
+  if(path==='/')return route.fulfill({contentType:'text/html; charset=utf-8',body:`<html><head><meta charset="utf-8"><style>${styles}</style></head><body><button id="check" onclick="openDesktopUpdater()">检查更新</button><script src="/static/js/desktop-updater.js"></script></body></html>`});
+  if(path.endsWith('.json') && mode==='fail')return route.fulfill({status:503,body:'unavailable'});
+  return route.fulfill({contentType:path.endsWith('.json')?'application/json':'text/javascript',body:fs.readFileSync('.'+path)});
+ });
+ await page.addInitScript(()=>{window.__TAURI__={core:{invoke:async command=> command==='get_update_settings'?{updatePolicy:'disabled'}:{available:window.testAvailable||false,currentVersion:'2.0.5',latestVersion:'2.0.6',releaseNotes:'测试新更新'}}};});
+ await page.goto('http://timeline.test/');
+ await page.click('#check');
+ await page.waitForSelector('.update-history-entry');
+ assert.equal(await page.locator('.update-history-entry').count(),313);
+ assert.equal(await page.locator('.update-history-badge').textContent(),'当前版本');
+ assert.equal(await page.locator('.update-history-entry strong').first().textContent(),'v2.0.5');
+ fs.mkdirSync('.codex-tmp/update-history',{recursive:true});
+ await page.screenshot({path:'.codex-tmp/update-history/light.png'});
+ await page.evaluate(()=>{document.documentElement.classList.add('theme-dark');document.body.classList.add('theme-dark');});
+ assert.equal(await page.locator('.studio-modal-panel').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(32, 32, 31)');
+ await page.screenshot({path:'.codex-tmp/update-history/dark.png'});
+ await page.setViewportSize({width:390,height:760});
+ await page.screenshot({path:'.codex-tmp/update-history/mobile.png'});
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await page.locator('.studio-modal-close').focus();
+ await page.keyboard.press('Shift+Tab');
+ assert.equal(await page.evaluate(()=>document.activeElement.dataset.action),'confirm');
+ await page.keyboard.press('Escape');
+ assert.equal(await page.locator('.studio-modal').count(),0);
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'check');
+ mode='fail';
+ await page.click('#check');
+ await page.waitForFunction(()=>document.querySelector('.update-history-state')?.textContent.includes('无法读取'));
+ await page.keyboard.press('Escape');
+ mode='ok';
+ await page.evaluate(()=>window.testAvailable=true);
+ await page.click('#check');
+ await page.waitForSelector('[data-action="apply"]');
+ assert.equal(await page.locator('.update-history-list').count(),0);
+ await browser.close();
+ console.log('PASS: 313 records, current version, light/dark/mobile, focus trap/Escape, read failure, available-update flow');
+})().catch(e=>{console.error(e);process.exit(1)});
+

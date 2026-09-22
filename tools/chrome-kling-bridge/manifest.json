@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "拾影 · 可灵自动填充",
+  "version": "0.1.0",
+  "description": "接收拾影画布中的图片、视频和提示词，填充到可灵 Omni，不提交生成。",
+  "permissions": ["storage", "scripting", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://klingai.com/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html"}
+}

@@ -1807,6 +1807,10 @@ function requestKlingAuthorization(){
     if(!dialog.open) dialog.showModal();
 }
 function bindKlingConnectionControls(wrap){
+    wrap.querySelectorAll('[data-kling-web-fill]').forEach(button => {
+        button.onmousedown = event => event.stopPropagation();
+        button.onclick = event => { event.stopPropagation(); void fillKlingWebDraft(button.dataset.klingWebFill); };
+    });
     wrap.querySelectorAll('.kling-connection-actions button, .kling-connection-actions a').forEach(button => {
         button.onmousedown = event => event.stopPropagation();
     });
@@ -1822,6 +1826,40 @@ function bindKlingConnectionControls(wrap){
         klingCliState = {...klingCliState, loaded:false};
         loadKlingCapabilities();
     };
+}
+const klingWebSendingNodes=new Set();
+async function fillKlingWebDraft(nodeId){
+    const node=nodes.find(item=>item.id===nodeId);
+    if(!node || klingWebSendingNodes.has(nodeId)) return;
+    klingWebSendingNodes.add(nodeId);
+    try {
+        let prompt, refs;
+        if(node.type==='film-video'){
+            const built=window.CanvasFilmNodes.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target=>connectedCanvasPromptTextForSubmission(target)});
+            prompt=built.prompt; refs=built.refs;
+        } else {
+            const sources=orderedSources(node,generatorSources(node));
+            prompt=combinedGeneratorPrompt(node,sources); refs=sources.flatMap(source=>source.refs || []);
+        }
+        if(!String(prompt || '').trim()) throw new Error('请先输入提示词，再发送到可灵');
+        const references=(refs || []).map(ref=>({url:ref.url,kind:mediaKindForRef(ref),name:ref.name || ''}));
+        const response=await fetch('/api/kling-web/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references,node_id:node.id})});
+        const draft=await response.json();
+        if(!response.ok) throw new Error(draft.detail || '发送草稿失败');
+        node.klingWebDraftId=draft.id;
+        scheduleSave();
+        setStatus('等待 Chrome 插件接收；请在插件中连接本机拾影地址（仅填充，不生成）');
+        const deadline=Date.now()+330000;
+        while(Date.now()<deadline){
+            await new Promise(resolve=>setTimeout(resolve,2000));
+            const result=await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`).then(async r=>{const data=await r.json();if(!r.ok) throw new Error(data.detail || '读取草稿状态失败');return data;});
+            if(result.status==='filled'){setStatus('可灵参考素材和提示词已填充，未提交生成');return;}
+            if(['failed','cancelled'].includes(result.status)) throw new Error(result.message || '填充失败');
+        }
+        await fetch(`/api/kling-web/drafts/${encodeURIComponent(draft.id)}`,{method:'DELETE'});
+        throw new Error('未收到插件填充结果，请检查 Chrome 插件连接和可灵页面');
+    } catch(error){showErrorModal(error.message || String(error),'可灵网页填充');}
+    finally{klingWebSendingNodes.delete(nodeId);}
 }
 async function ensureKlingGenerationAvailable(opts={}){
     if(!klingCliState.loaded && !klingCliState.loading) await loadKlingCapabilities();
@@ -12053,7 +12091,7 @@ function renderNode(node){
     });
     if(node.type === 'film-video' && isKlingVideoNode(node)){
         ensureKlingCapabilities();
-        body.querySelector('.film-video-settings')?.insertAdjacentHTML('beforeend', klingConnectionPanelHtml());
+        body.querySelector('.film-video-settings')?.insertAdjacentHTML('beforeend', klingConnectionPanelHtml()+`<button type="button" class="tool-btn" data-kling-web-fill="${escapeAttr(node.id)}">填充到可灵（不生成）</button>`);
     }
     if(window.CanvasFilmWorkflow?.handles(node)) body.innerHTML = window.CanvasFilmWorkflow.bodyHtml(node);
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
@@ -15150,13 +15188,7 @@ function klingVideoSettingsHtml(node){
     const model = klingModelSpec(node);
     const modeLabel = mode === 'image_to_video' ? '图生视频（已检测到图片输入）' : '文生视频（未检测到图片输入）';
     const videoRefs = videoRefsOnly(orderedSources(node, generatorSources(node)).flatMap(source => source.refs || []));
-    const videoReferenceMessage = String(
-        klingCliState.capabilities?.video_reference_message
-        || '可灵视频参考已移除；视频截取片段仍可用于其他支持视频输入的平台。'
-    );
-    const videoReferenceNote = videoRefs.length
-        ? `<div class="muted-note kling-video-reference-warning">${escapeHtml(videoReferenceMessage)}</div>`
-        : '';
+    const videoReferenceNote = `<div class="muted-note kling-video-reference-warning">${videoRefs.length ? '视频参考可通过 Chrome 插件上传到可灵 Omni。' : '也可将图片和提示词发送到可灵网页。'}网页参数请在填充后核对。</div><button type="button" class="tool-btn" data-kling-web-fill="${escapeAttr(node.id)}">填充到可灵（不生成）</button>`;
     if(!klingCliState.authenticated || !model){
         return `${klingConnectionPanelHtml()}${videoReferenceNote}<div class="muted-note">${escapeHtml(klingLoginState.busy ? '完成浏览器授权后会自动刷新可用模型。' : klingCliState.error || '连接账号后，模型参数会从可灵实时加载；无需安装 npm。')}</div>`;
     }

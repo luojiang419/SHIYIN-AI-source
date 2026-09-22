@@ -410,6 +410,10 @@ def require_local_admin(request: Request) -> AccountIdentity:
     return identity
 
 
+from canvas_core.kling_web_bridge import create_router as create_kling_web_router
+app.include_router(create_kling_web_router(request_identity))
+
+
 @app.middleware("http")
 async def account_authentication_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"

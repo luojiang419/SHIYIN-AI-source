@@ -177,3 +177,23 @@ function attachPlaybackControls(container, video, fullscreenTarget, companions =
 }
 attachPlaybackControls($('[data-preview-controls]'), preview, $('[data-preview-player]'));
 attachPlaybackControls($('[data-compare-controls]'), sourceVideo, null, [depthVideo]);
+
+const updateButton = document.querySelector('#check-update');
+if (updateButton) updateButton.onclick = async () => {
+  if (!invoke) return;
+  const original = updateButton.textContent;
+  updateButton.disabled = true;
+  updateButton.textContent = '…';
+  try {
+    const update = await invoke('check_for_update');
+    if (!update.available) { alert(`当前已是最新版本 v${update.currentVersion}`); return; }
+    const notes = update.releaseNotes ? `\n\n更新说明：${update.releaseNotes}` : '';
+    if (!confirm(`发现 SHIYIN 批量深度视频提取器更新 ${update.latestVersion}，包大小 ${(update.assetSize / 1048576).toFixed(1)} MB。${notes}\n\n立即下载并更新？`)) return;
+    updateButton.textContent = '↓';
+    const downloaded = update.downloaded ? update : await invoke('download_update');
+    if (downloaded.downloaded && confirm('更新已下载并校验完成。现在关闭软件、由独立更新器安装并重新启动？')) {
+      await invoke('apply_downloaded_update');
+    }
+  } catch (error) { alert(`检查或安装更新失败：${error}`); }
+  finally { updateButton.disabled = false; updateButton.textContent = original; }
+};

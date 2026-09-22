@@ -25,6 +25,8 @@ from distribution.traffic import Traffic
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = Path(os.environ.get('SHIYIN_DISTRIBUTION_DATA', 'D:/SHIYIN-Distribution'))
 ALLOWED_ROOTS = ('app/web', 'app/backend/canvas-backend', 'app/skills')
+DEPTH_BATCH_KIND = 'hot-depth-batch'
+DEPTH_BATCH_ROOTS = ('SHIYIN-Depth-Batch.exe', 'worker', 'worker-overlays', 'scripts', 'runtime-manifest.json', 'model-download-manifest.json', 'PORTABLE.md')
 MAX_SERVICE_LOGS = 1000
 
 
@@ -51,7 +53,7 @@ def local_ip():
             return socket.gethostbyname(socket.gethostname())
 
 
-def relative_path(value, hot=False):
+def relative_path(value, hot=False, depth_batch=False):
     if not isinstance(value, str) or not value or '\\' in value or ':' in value:
         raise ValueError('文件路径无效')
     parts = value.split('/')
@@ -59,6 +61,8 @@ def relative_path(value, hot=False):
         raise ValueError('文件路径越界')
     if hot and value != 'SHIYIN AI.exe' and not any(value.startswith(p + '/') for p in ALLOWED_ROOTS):
         raise ValueError('热更新只能包含应用文件')
+    if depth_batch and value not in DEPTH_BATCH_ROOTS and not any(value.startswith(p + '/') for p in DEPTH_BATCH_ROOTS if '.' not in p):
+        raise ValueError('批量深度更新只能包含应用文件')
     return Path(*parts)
 
 
@@ -356,13 +360,15 @@ class Center:
             raise ValueError('旧更新器发布路线已停用，请发布2.0.0或更高版本的全量基准包')
         source = Path(source).resolve(strict=True)
         files = []
-        if kind in ('hot', 'hot-bootstrap', 'hot-updater'):
+        if kind in ('hot', 'hot-bootstrap', 'hot-updater', DEPTH_BATCH_KIND):
             manifest = json.loads((source / 'manifest.json').read_text('utf-8-sig'))
             version = str(manifest['version'])
             if not re.fullmatch(r'\d{14}', version):
                 raise ValueError('热更新版本必须为14位时间序号')
-            if not re.fullmatch(r'\d+\.\d+\.\d+', str(manifest.get('min_desktop_version', ''))):
+            if kind != DEPTH_BATCH_KIND and not re.fullmatch(r'\d+\.\d+\.\d+', str(manifest.get('min_desktop_version', ''))):
                 raise ValueError('缺少有效的最低桌面基线版本')
+            if kind == DEPTH_BATCH_KIND and manifest.get('product') != 'depth-batch':
+                raise ValueError('批量深度更新产品标识无效')
             if not isinstance(manifest.get('files'), list) or not 0 < len(manifest['files']) <= 20000:
                 raise ValueError('热更新文件数量无效')
             protocol = manifest.get('protocol_version')
@@ -373,17 +379,19 @@ class Center:
             for item in manifest['files']:
                 if not isinstance(item.get('size'), int) or item['size'] < 0 or not re.fullmatch(r'[0-9a-f]{64}', str(item.get('sha256', ''))):
                     raise ValueError('文件大小或 SHA-256 格式无效')
-                rel = relative_path(item['path'], hot=True)
+                rel = relative_path(item['path'], hot=kind != DEPTH_BATCH_KIND, depth_batch=kind == DEPTH_BATCH_KIND)
                 files.append(dict(item))
             roots = manifest.get('prune_roots', [])
-            if any(r not in ALLOWED_ROOTS for r in roots):
+            allowed_roots = DEPTH_BATCH_ROOTS if kind == DEPTH_BATCH_KIND else ALLOWED_ROOTS
+            if any(r not in allowed_roots for r in roots):
                 raise ValueError('清理目录超出应用白名单')
             if kind == 'hot-bootstrap':
                 if roots or len(files) != 1 or files[0]['path'] != 'SHIYIN AI.exe':
                     raise ValueError('更新器引导包只能包含桌面主程序')
             if protocol == 3:
                 package = manifest.get('package')
-                if not isinstance(package, dict) or not re.fullmatch(r'SHIYIN-Hot-Update-\d{14}\.shiyin-update', str(package.get('name', ''))):
+                package_pattern = r'SHIYIN-Depth-Batch-Update-\d{14}\.shiyin-update' if kind == DEPTH_BATCH_KIND else r'SHIYIN-Hot-Update-\d{14}\.shiyin-update'
+                if not isinstance(package, dict) or not re.fullmatch(package_pattern, str(package.get('name', ''))):
                     raise ValueError('缺少有效的单包信息')
                 if not isinstance(package.get('size'), int) or package['size'] <= 0 or not re.fullmatch(r'[0-9a-f]{64}', str(package.get('sha256', ''))):
                     raise ValueError('增量包大小或 SHA-256 无效')
@@ -398,7 +406,7 @@ class Center:
                     if len(entries) != len(files) or len({entry.filename for entry in entries}) != len(entries):
                         raise ValueError('增量包文件数量或路径重复')
                     for entry in entries:
-                        relative_path(entry.filename, hot=True)
+                        relative_path(entry.filename, hot=kind != DEPTH_BATCH_KIND, depth_batch=kind == DEPTH_BATCH_KIND)
                         item = expected.get(entry.filename)
                         if not item or entry.file_size != item['size']:
                             raise ValueError('增量包包含清单外文件或大小不匹配：' + entry.filename)
@@ -503,10 +511,11 @@ class Center:
             row = db.execute("SELECT * FROM releases WHERE kind=? AND state='published' ORDER BY created DESC LIMIT 1", (kind,)).fetchone()
         return dict(row) if row else None
 
-    def hot_release_for(self, installed_version=''):
+    def hot_release_for(self, installed_version='', desktop_version=''):
         target = self.active('hot')
         if not target or (installed_version and target['version'] <= installed_version):
             return None
+        desktop = tuple(map(int, desktop_version.split('.'))) if re.fullmatch(r'\d+\.\d+\.\d+', desktop_version) else None
         with self.db() as db:
             rows = db.execute(
                 "SELECT * FROM releases WHERE kind='hot' AND state IN ('published','archived') "
@@ -518,6 +527,9 @@ class Center:
             manifest = json.loads(json.loads(release['manifest'])['payload'])
             paths = {str(item.get('path') or '') for item in manifest.get('files', [])}
             if 'SHIYIN AI.exe' in paths and any(path.startswith('app/backend/canvas-backend/') for path in paths):
+                minimum = tuple(map(int, manifest['min_desktop_version'].split('.')))
+                if desktop and desktop < minimum:
+                    continue
                 return release
         return target
 
@@ -654,6 +666,12 @@ class Center:
                         return self.json({'error': '旧迁移工具已停用，请从首页下载2.0.0基准安装包'}, 410)
                     if path == '/hot-update/manifest.json':
                         return self.json({'error': '请从首页下载2.0.0基准安装包覆盖升级'}, 409)
+                    if path == '/v1/catalog' and 'product=depth-batch' in urlsplit(self.path).query:
+                        owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
+                        release = owner.active(DEPTH_BATCH_KIND)
+                        if not release:
+                            return self.json({'release': None})
+                        return self.json(json.loads(release['manifest']))
                     if path == '/v1/catalog':
                         owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
                         capabilities = {value.strip() for value in self.headers.get('X-Shiyin-Capabilities', '').split(',')}
@@ -663,7 +681,7 @@ class Center:
                         desktop = parts[0].strip()
                         installed = parts[1].strip() if len(parts) > 1 and re.fullmatch(r'\d{14}', parts[1].strip()) else ''
                         if re.fullmatch(r'\d+\.\d+\.\d+', desktop) and {'package-v3', 'fast-extract-v1'} <= capabilities:
-                            candidate = owner.hot_release_for(installed)
+                            candidate = owner.hot_release_for(installed, desktop)
                             if candidate:
                                 manifest = json.loads(json.loads(candidate['manifest'])['payload'])
                                 minimum = max((2, 0, 0), tuple(map(int, manifest['min_desktop_version'].split('.'))))
@@ -683,6 +701,14 @@ class Center:
                         sha = path.removeprefix('/v1/blobs/')
                         if not re.fullmatch(r'[0-9a-f]{64}', sha): raise ValueError('哈希无效')
                         return self.file(owner.data / 'blobs' / sha, owner.blob_label(sha))
+                    if path.startswith('/hot-depth-batch/packages/'):
+                        release = owner.active(DEPTH_BATCH_KIND)
+                        if not release: return self.json({'error': '批量深度更新尚未发布'}, 404)
+                        manifest = json.loads(json.loads(release['manifest'])['payload'])
+                        name = path.removeprefix('/hot-depth-batch/packages/')
+                        package = manifest.get('package', {})
+                        if name != package.get('name'): return self.json({'error': '更新包不在发布清单'}, 404)
+                        return self.file(owner.data / 'blobs' / package['sha256'])
                     for kind in ('person-depth', 'video-depth', 'video-depth-runtime'):
                         if path.startswith('/' + kind + '/'):
                             release = owner.active(kind)

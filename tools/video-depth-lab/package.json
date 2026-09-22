@@ -1,12 +1,14 @@
 {
   "name": "shiyin-video-depth-lab",
   "private": true,
-  "version": "0.3.2",
+  "version": "1.0.0",
   "description": "GemDepth 与 Video Depth Anything 本地视频深度技术验证工具",
   "type": "module",
   "scripts": {
     "dev": "node ../../node_modules/@tauri-apps/cli/tauri.js dev",
     "build": "node ../../node_modules/@tauri-apps/cli/tauri.js build --no-bundle",
+    "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "update:build": "python scripts/build-hot-update.py",
     "check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "node --test tests/*.test.mjs && python -m unittest discover -s tests -p test_*.py"
   }

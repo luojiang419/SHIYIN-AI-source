@@ -12,6 +12,8 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod updater;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -693,10 +695,11 @@ pub fn run() {
         .setup(|app| {
             let root = locate_lab_root().map_err(std::io::Error::other)?;
             app.manage(LabState {
-                root,
+                root: root.clone(),
                 operation_lock: Arc::new(Mutex::new(())),
                 active_pid: Arc::new(Mutex::new(None)),
             });
+            app.manage(updater::UpdateState { root });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -712,10 +715,19 @@ pub fn run() {
             export_parameter_config,
             import_parameter_config,
             open_output_directory,
-            cancel_inference
+            cancel_inference,
+            updater::get_update_settings,
+            updater::save_update_settings,
+            updater::check_for_update,
+            updater::download_update,
+            updater::apply_downloaded_update
         ])
         .run(tauri::generate_context!())
         .expect("SHIYIN 视频深度验证台启动失败");
+}
+
+pub fn apply_depth_batch_update_from_args() -> bool {
+    updater::apply_from_args()
 }
 
 #[cfg(test)]

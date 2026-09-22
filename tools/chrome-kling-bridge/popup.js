@@ -7,9 +7,9 @@ document.querySelector('#connect').onclick=async()=>{
   try {
     const url=new URL(input.value);
     if(url.protocol!=='http:' || !['127.0.0.1','localhost'].includes(url.hostname) || url.username || url.password) throw new Error('请输入本机 http://127.0.0.1:端口 或 localhost 地址');
-    await chrome.storage.local.set({base:url.origin,enabled:true});
+    await chrome.storage.local.set({base:url.origin,enabled:true,lastStatus:''});
     await chrome.alarms.create('kling-poll',{periodInMinutes:0.5});
-    status.textContent='已连接，正在接收……';
+    status.textContent='正在连接……';
     await chrome.runtime.sendMessage({type:'poll'});
     const data=await chrome.storage.local.get('lastStatus');
     status.textContent=data.lastStatus || '已连接，等待画布发送草稿';

@@ -38,7 +38,10 @@ async function tick() {
   let draft;
   try {
     ({draft}=await api(base,'/claim',{method:'POST'}));
-    if (!draft) return;
+    if (!draft) {
+      await chrome.storage.local.set({lastStatus:`已连接 ${base}，等待画布发送草稿`});
+      return;
+    }
     const tabId=await targetTab();
     const sourceKey=JSON.stringify(draft.references.map(ref=>[ref.kind,ref.url]));
     const {reuse}=await call(tabId,'prepare',[{sourceKey}]);

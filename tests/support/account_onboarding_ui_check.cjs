@@ -71,6 +71,8 @@ const { chromium } = require('playwright');
     await page.goto(`${origin}/api/auth/bootstrap`);
     assert.equal(new URL(page.url()).pathname, '/login');
     await page.getByRole('button', { name: '登录并进入' }).waitFor();
+    await page.getByRole('heading', { name: '使用原账号登录' }).waitFor();
+    assert((await (await context.request.get(`${origin}/api/account/setup`)).json()).has_registered_accounts);
     await page.getByRole('button', { name: '注册账号', exact: true }).click();
     await page.locator('#account').fill('界面普通用户');
     await page.locator('#password').fill('普通密码');

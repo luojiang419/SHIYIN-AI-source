@@ -1,4 +1,4 @@
-# SHIYIN AI v2.0.4
+# SHIYIN AI v2.0.5
 
 ## 正式全量安装基准包
 

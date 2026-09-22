@@ -11,7 +11,7 @@ SPEC.loader.exec_module(BUILD_HOT_UPDATE)
 
 
 def test_default_hot_update_floor_matches_current_baseline():
-    assert BUILD_HOT_UPDATE.DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION == "2.0.4"
+    assert BUILD_HOT_UPDATE.DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION == "2.0.5"
 
 
 def test_publish_guard_rejects_a_release_that_skips_connected_clients():

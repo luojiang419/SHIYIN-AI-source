@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from distribution.service import atomic_json, digest, DEFAULT_DATA
 
-DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION = '2.0.4'
+DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION = '2.0.5'
 
 
 def version_tuple(value):

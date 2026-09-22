@@ -186,6 +186,12 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Pat
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-Path $stageRoot 'README.md')
 
 $webRoot = Join-Path $stageRoot 'app\web'
+$historyPython = Join-Path $projectRoot 'python\python.exe'
+if (-not (Test-Path -LiteralPath $historyPython -PathType Leaf)) { $historyPython = 'python' }
+$stagedHistory = Join-Path $webRoot 'update-history.json'
+& $historyPython (Join-Path $PSScriptRoot 'update_history.py') --stage $stagedHistory
+if ($LASTEXITCODE -ne 0) { throw 'Version history staging failed.' }
+
 & node (Join-Path $PSScriptRoot 'stamp-web-cache-version.mjs') --root $webRoot --version $version | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Web cache-version stamping failed.' }
 Assert-StagedWebAssets $stageRoot $version
@@ -217,4 +223,6 @@ if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw "Instal
 
 # 历史正式安装包是分发产物，不属于可再生缓存，构建新基线时保留。
 
+& $historyPython (Join-Path $PSScriptRoot 'update_history.py') --commit-stage $stagedHistory
+if ($LASTEXITCODE -ne 0) { throw 'Version history archive failed.' }
 Write-Host "Installer built: $installerPath"

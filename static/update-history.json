@@ -1,9 +1,33 @@
 {
   "history": [
     {
-      "version": "2.0.5",
-      "updated_at": "2026-09-22T00:00:00+08:00",
+      "id": "hot:20260922185923",
+      "version": "20260922185923",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-22T19:02:53.928865+08:00",
+      "min_desktop_version": "2.0.5",
       "items": [
+        {
+          "type": "update",
+          "text": "个人偏好：按平台保存图片与视频默认参数、全局快捷保存；底部功能按钮右键隐藏；兼容本机旧偏好迁移"
+        },
+        {
+          "type": "update",
+          "text": "个人偏好：按平台保存图片与视频默认参数、全局快捷保存；底部功能按钮右键隐藏；兼容本机旧偏好迁移。适用 2.0.5 及以上客户端。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "version": "2.0.5",
+      "updated_at": "2026-09-22T17:34:21.098907+08:00",
+      "items": [
+        {
+          "type": "baseline",
+          "text": "安装基线 2.0.4 → 2.0.5。全量安装基准更新，包含已有注册账号升级登录兼容；旧基准撤下，历史文字记录保留。"
+        },
         {
           "type": "fix",
           "text": "已有注册账号升级后默认进入登录，可继续使用原账号密码；保留原有角色、作品和配置，无需重新注册。"
@@ -11,13 +35,92 @@
         {
           "type": "improve",
           "text": "作为当前全量安装基准，支持旧版覆盖升级，并继续接收局域网热更新。"
+        },
+        {
+          "type": "update",
+          "text": "2.0.5 唯一全量基准：账号设置、图片生成、AI助手、保存方式四步统一引导。旧版本请覆盖安装并保留 data。"
         }
-      ]
+      ],
+      "id": "release:2.0.5",
+      "kind": "baseline",
+      "component": "",
+      "record_status": "published",
+      "min_desktop_version": "",
+      "source": "分发数据库发布记录",
+      "previous_version": "2.0.4"
+    },
+    {
+      "id": "hot:20260922160134",
+      "version": "20260922160134",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-22T16:01:34+08:00",
+      "min_desktop_version": "2.0.3",
+      "items": [
+        {
+          "type": "update",
+          "text": "2.0.3 全量安装基准：首次账号设置、持久登录与按需抠图组件"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "cutout-runtime:1.0.0",
+      "version": "1.0.0",
+      "kind": "component",
+      "component": "cutout-runtime",
+      "record_status": "published",
+      "updated_at": "2026-09-22T15:44:41.392638+08:00",
+      "min_desktop_version": "",
+      "items": [
+        {
+          "type": "update",
+          "text": "透明图片抠图运行时和 SAM 权重，客户端首次使用时按需下载；优先局域网分发。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260922135859",
+      "version": "20260922135859",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-22T13:58:59+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "内置可灵Chrome画布助手0.4.0，新增本地安装引导、自动配对、任务续接与版本检测"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260922101959",
+      "version": "20260922101959",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-22T10:19:59+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "新增首次启动三步磨砂玻璃引导：配置图片生成、从 CC Switch 自动接入 AI助手，并选择快捷保存或手动保存方式。"
+        }
+      ],
+      "source": "本地构建清单"
     },
     {
       "version": "2.0.4",
-      "updated_at": "2026-09-22T00:00:00+08:00",
+      "updated_at": "2026-09-22T16:42:04+08:00",
       "items": [
+        {
+          "type": "baseline",
+          "text": "安装基线 2.0.3 → 2.0.4。全量安装基准更新为四步首次引导版本；旧基准和此前热更新撤下。"
+        },
         {
           "type": "improve",
           "text": "首次使用统一为账号设置、图片生成、AI助手、保存方式四步引导，使用一致的磨砂面板和进度样式。"
@@ -26,12 +129,20 @@
           "type": "improve",
           "text": "优化引导面板尺寸，适配深浅主题与窄屏显示。"
         }
-      ]
+      ],
+      "kind": "baseline",
+      "previous_version": "2.0.3",
+      "record_status": "published",
+      "source": "Git 发布提交 e4da1f4c"
     },
     {
       "version": "2.0.3",
-      "updated_at": "2026-09-22T00:00:00+08:00",
+      "updated_at": "2026-09-22T15:58:23+08:00",
       "items": [
+        {
+          "type": "baseline",
+          "text": "安装基线 2.0.1 → 2.0.3。启用新的全量安装基准，旧客户端覆盖升级；清理旧软件包，固定模型继续保留。"
+        },
         {
           "type": "feature",
           "text": "2.0.3 为新的全量安装基准包。首次启动自行设置账号密码，首个本机注册账号为管理员，后续账号数据独立保存。"
@@ -40,12 +151,912 @@
           "type": "improve",
           "text": "桌面登录状态安全持久保存，重启无需重复登录；注册后继续完成 API 和保存方式引导。旧版覆盖安装保留作品与配置。"
         }
+      ],
+      "kind": "baseline",
+      "previous_version": "2.0.1",
+      "record_status": "published",
+      "source": "Git 发布提交 c45c4406"
+    },
+    {
+      "id": "hot:20260921165744",
+      "version": "20260921165744",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-21T16:57:44+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "批量换款支持连续生成：生成中任务自动追加等待缩略图，最新任务与作品优先显示"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921161715",
+      "version": "20260921161715",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-21T16:17:15+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复画布移动按键，并增强热更新兼容检查与隐藏窗口提示"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921160301",
+      "version": "20260921160301",
+      "kind": "web",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-21T16:03:01+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复画布移动按键：左键/中键习惯下的 Ctrl 与空格拖拽行为一致"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921160148",
+      "version": "20260921160148",
+      "kind": "web",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-21T16:01:48+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复画布移动按键：左键/中键习惯下的 Ctrl 与空格拖拽行为一致"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921154055",
+      "version": "20260921154055",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-21T15:40:55+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "LAN hot update"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921151023",
+      "version": "20260921151023",
+      "kind": "hot",
+      "updated_at": "2026-09-21T15:10:23+08:00",
+      "record_status": "published",
+      "source": "开发任务/192-批量换款与一键复刻执行一致性实测.md",
+      "items": [
+        {
+          "type": "fix",
+          "text": "批量换款复用目标人物深度框，优先保持目标景别、主体占比和裁切边界，改善与一键复刻的结果一致性。"
+        }
       ]
     },
     {
-      "version": "2.0.1",
-      "updated_at": "2026-09-17T01:30:00+08:00",
+      "id": "hot:20260921123347",
+      "version": "20260921123347",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-21T12:33:47+08:00",
+      "min_desktop_version": "2.0.1",
       "items": [
+        {
+          "type": "update",
+          "text": "修复画布放大浏览时自动高度节点被错误隐藏（兼容 2.0.1 客户端）"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921122733",
+      "version": "20260921122733",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-21T12:27:33+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复画布放大浏览时自动高度节点被错误隐藏"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921112332",
+      "version": "20260921112332",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-21T11:23:32+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复智能追色节点输入端口：明确显示参考商品图与待追色生成图，并支持输出连接。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260921112056",
+      "version": "20260921112056",
+      "kind": "web",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-21T11:20:56+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复智能追色节点输入端口：明确显示参考商品图与待追色生成图，并支持输出连接。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260920214122",
+      "version": "20260920214122",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-20T21:41:22+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复一键复刻补充要求误拦截；提交时固定当前输入，清空不再恢复旧要求。材质效果仍需逐图验收。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260920214016",
+      "version": "20260920214016",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-20T21:40:16+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复一键复刻补充要求误拦截；提交时固定当前输入，清空不再恢复旧要求。材质效果仍需逐图验收。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260919231539",
+      "version": "20260919231539",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T23:15:39+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "LAN hot update"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260919212437",
+      "version": "20260919212437",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T21:24:37+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "移除全能模式细节图重复的归属下拉项"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260919191706",
+      "version": "20260919191706",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T19:17:06+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复全能模式素材卡片下方被裁切的面料细节入口"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260919182018",
+      "version": "20260919182018",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-19T18:20:18+08:00",
+      "min_desktop_version": "2.0.0",
+      "items": [
+        {
+          "type": "update",
+          "text": "2.0.2 基准完整热更新：包含当前桌面宿主、后端与前端；全能模式生成操作区布局修复。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260919181105",
+      "version": "20260919181105",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T18:11:05+08:00",
+      "min_desktop_version": "2.0.0",
+      "items": [
+        {
+          "type": "update",
+          "text": "2.0.2 基准完整热更新：包含当前桌面宿主、后端与前端；全能模式生成操作区布局修复。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260919165444",
+      "version": "20260919165444",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T17:08:10.256282+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "全能模式与智能换衣绑定面料细节图"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919161703",
+      "version": "20260919161703",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T16:28:27.839228+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "全能模式、智能换衣与动作迁移服装纹理还原（版本校准）"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919160057",
+      "version": "20260919160057",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T16:14:20.737500+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "全能模式、智能换衣与动作迁移服装纹理还原"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919144959",
+      "version": "20260919144959",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T14:50:03.822985+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复纯前端热更新的客户端版本兼容性"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919144659",
+      "version": "20260919144659",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T14:47:02.552670+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "前端功能更新与体验优化"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919143036",
+      "version": "20260919143036",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T14:30:44.658923+08:00",
+      "min_desktop_version": "2.0.2",
+      "items": [
+        {
+          "type": "update",
+          "text": "无限画布素材库拖放投放与上传节点布局优化"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919142937",
+      "version": "20260919142937",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T14:29:39.171938+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "无限画布素材库可直接拖入图片上传节点和各图片上传格；上传节点加宽，完整显示底部编辑面板，竖图完整适配预览。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919140521",
+      "version": "20260919140521",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T14:05:22.555406+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "素材库删除确认改为居中主题弹窗，背景模糊"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919134114",
+      "version": "20260919134114",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T13:53:50.573271+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "素材库上传立即显示，图片智能分类改为后台执行"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919133332",
+      "version": "20260919133332",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T13:33:33.972538+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复素材库打开时外部图片拖放被画布遮罩抢占"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919130311",
+      "version": "20260919130311",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T13:15:38.502452+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复无限画布素材库外部拖放、媒体入库与画布遮罩停留"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919110324",
+      "version": "20260919110324",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T11:03:27.086681+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "画布移动操作支持长按选择按钮，切换左键或中键拖动画布"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919101739",
+      "version": "20260919101739",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T10:17:48.375648+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "Lookbook 编辑框滚动回顶修复，并移除需求输入说明文字"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260919094154",
+      "version": "20260919094154",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-19T09:58:30.486985+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复 Lookbook 输入失焦、Ctrl 画布平移与单图视频自动解析连续镜头"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "baseline-attempt:2.0.2",
+      "version": "2.0.2",
+      "kind": "baseline",
+      "updated_at": "2026-09-19T00:00:00+08:00",
+      "record_status": "failed",
+      "source": "开发任务/195-重置软件发布并建立2.0.2基准.md",
+      "items": [
+        {
+          "type": "baseline",
+          "text": "计划切换到 2.0.2 全量安装基线，安装器版本资源校验失败，未发布全量安装包；对应完整热更新另行发布。"
+        }
+      ]
+    },
+    {
+      "id": "hot:20260918135459",
+      "version": "20260918135459",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-18T14:09:50.397664+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复批量换款与一键复刻深度模式、参考图校验及作品完整预览"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260918084551",
+      "version": "20260918084551",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-18T08:56:49.280093+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "热更新遗漏版本自动补齐检查点；包含当前桌面宿主、后端和前端完整状态"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260918075911",
+      "version": "20260918075911",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-18T07:59:12.969044+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "图片编辑预览支持鼠标左键拖拽平移，并修复 Esc 无法退出预览"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917224212",
+      "version": "20260917224212",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T22:42:14.156716+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "一键复刻：平台与模型合并为两级菜单，模式右侧新增深度控制；支持独立调整深度图并用于复刻生成。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917221054",
+      "version": "20260917221054",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T22:10:55.428118+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复自动抠像结果无法连接一键复刻的问题，支持透明 PNG 作为服装参考及其他参考图。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917212046",
+      "version": "20260917212046",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T21:20:58.246753+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "调整统一图片编辑弹窗按钮顺序：左侧返回画布，右侧保存并返回。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917205236",
+      "version": "20260917205236",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T20:57:34.008109+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复抠像打开后仅显示暗色遮罩的问题；裁切、多宫格、抠像整合到统一全屏图片编辑弹窗，右上角统一保存并返回、返回画布，支持 Esc 退出。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917195929",
+      "version": "20260917195929",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T20:08:59.630150+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复自动抠像安装版推理失败；默认全屏编辑，新增保存并返回、返回画布与 Esc 返回，完善失败提示和保存保护。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917183544",
+      "version": "20260917183544",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T18:39:37.469636+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复小模型人物模式包含背景：自动补齐轻量人体分割，仅输出人物深度。更新后请重新生成。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917172803",
+      "version": "20260917172803",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T17:30:53.713732+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "轻量深度图和深度视频模型切换为自有 ModelScope 固定仓库国内源优先，保留官方源回退与 SHA-256 校验。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917171303",
+      "version": "20260917171303",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T17:15:52.954423+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "设置新增深度模型自动、大模型和小模型三档；自动按8GB显存选择，手动档同时应用于深度图、深度视频和一键复刻。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917164910",
+      "version": "20260917164910",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T16:52:00.981937+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度图与深度视频按机器配置自动选择轻量或高质量模型；普通配置使用约50MB图像模型和116MB VDA Small，高显存设备保持高质量模型。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "video-depth:2.0.0",
+      "version": "2.0.0",
+      "kind": "component",
+      "component": "video-depth",
+      "record_status": "published",
+      "updated_at": "2026-09-17T16:48:07.840566+08:00",
+      "min_desktop_version": "",
+      "items": [
+        {
+          "type": "update",
+          "text": "新增 VDA Small 轻量档；普通配置下载约 116MB，高显存设备继续使用 VDA Base。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917162536",
+      "version": "20260917162536",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T16:28:28.953055+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复旧版深度视频运行时在 Windows 进程退出状态延迟时未能回退，避免生成完成后无法导出。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917144116",
+      "version": "20260917144116",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T14:43:58.151034+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度图与深度视频任务完成后自动释放显存，模型在内存保留5分钟并在空闲后自动卸载；兼容旧版深度视频运行时。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917133159",
+      "version": "20260917133159",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T13:34:54.113477+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "无限画布支持大视频及专业格式导入播放，上传节点显示媒体类型"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917125835",
+      "version": "20260917125835",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T12:58:36.212580+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "影视制作二级菜单按资产筹备、镜头预演、分镜定稿、镜头生成、后期处理五阶段重新排序。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917113838",
+      "version": "20260917113838",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T11:38:40.150172+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度视频对比播放使用进阶调校后的深度画面与原视频划像对比。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917105125",
+      "version": "20260917105125",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T10:51:27.011449+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度视频对比播放弹窗支持空格键播放和暂停。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917104659",
+      "version": "20260917104659",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T10:47:00.353876+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度视频节点新增源视频与深度结果实时划像对比，并增加播放进度拖动控制。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917100917",
+      "version": "20260917100917",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T10:09:18.963095+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复 IMAGE 图片素材卡输出端口拖线菜单：图片生成、视频生成、lookbook、深度图、一键复刻、拼图、批量处理、AI助手及影视制作二级菜单。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917095809",
+      "version": "20260917095809",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T09:58:10.964044+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复 VIDEO 视频素材卡输出端口拖线菜单：显示视频截取、视频抽帧、深度视频、截图、TOPAZ 视频超分并连接对应节点。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917095026",
+      "version": "20260917095026",
+      "kind": "web",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T09:50:28.141984+08:00",
+      "min_desktop_version": "2.0.1",
+      "items": [
+        {
+          "type": "update",
+          "text": "画布生成节点输出端口快捷菜单：视频截取、抽帧、深度视频、截图、视频超分；图片生成快捷连接及影视制作二级菜单。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260917091915",
+      "version": "20260917091915",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-17T09:23:39.976348+08:00",
+      "min_desktop_version": "2.0.0",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复深度视频运行时优先读取已配置的局域网分发地址；局域网失败后保留公网备用源。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "version": "2.0.1",
+      "updated_at": "2026-09-17T01:37:40+08:00",
+      "items": [
+        {
+          "type": "baseline",
+          "text": "安装基线 2.0.0 → 2.0.1。全量基线更新，增加深度资源国内下载与运行时适配。"
+        },
         {
           "type": "fix",
           "text": "非局域网首次使用深度图或深度视频时，自动从 ModelScope 国内源补齐固定模型和适配本机的运行时，并校验下载完整性。"
@@ -54,12 +1065,72 @@
           "type": "improve",
           "text": "安装包不内置深度视频运行时或VDA Base模型；首次使用时按设备下载所需档位。"
         }
-      ]
+      ],
+      "kind": "baseline",
+      "previous_version": "2.0.0",
+      "record_status": "published",
+      "source": "Git 发布提交 6a5521bc"
+    },
+    {
+      "id": "hot:20260916190822",
+      "version": "20260916190822",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-16T19:11:49.461295+08:00",
+      "min_desktop_version": "2.0.0",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复深度视频生成后节点不显示：兼容中文路径编码、恢复已完成任务及短暂断线重试"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260916181620",
+      "version": "20260916181620",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-16T18:20:09.458842+08:00",
+      "min_desktop_version": "2.0.0",
+      "items": [
+        {
+          "type": "update",
+          "text": "客户端显示计算机登录用户名和IP，同一计算机用户合并历史记录"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260916175144",
+      "version": "20260916175144",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-16T17:54:39.844303+08:00",
+      "min_desktop_version": "2.0.0",
+      "items": [
+        {
+          "type": "update",
+          "text": "2.0.0全新基线完整热更新：包含当前画布、工程包导出及冷启动修复；1.0.x用户请使用2.0.0基准安装包覆盖升级。"
+        },
+        {
+          "type": "update",
+          "text": "2.0.0全新发布基线，包含当前画布、工程包导出与冷启动修复。1.0.x请保存并退出软件后使用基准安装包覆盖原目录升级，后续使用2.0局域网热更新。"
+        }
+      ],
+      "source": "分发数据库发布记录"
     },
     {
       "version": "2.0.0",
-      "updated_at": "2026-09-16T00:00:00+08:00",
+      "updated_at": "2026-09-16T17:54:38.023693+08:00",
       "items": [
+        {
+          "type": "baseline",
+          "text": "安装基线 1.0.447 → 2.0.0。重置全量安装基线；1.0.x 用户通过全量包覆盖升级，保留用户数据。"
+        },
         {
           "type": "feature",
           "text": "无限画布改用新的视口引擎，仅挂载可见节点；原有工程、节点功能和页面布局保持兼容。"
@@ -67,13 +1138,509 @@
         {
           "type": "improve",
           "text": "Windows 源码桌面运行自动使用可用 Python，并隔离开发数据和端口。"
+        },
+        {
+          "type": "update",
+          "text": "2.0.0全新发布基线，包含当前画布、工程包导出与冷启动修复。1.0.x请保存并退出软件后使用基准安装包覆盖原目录升级，后续使用2.0局域网热更新。"
+        }
+      ],
+      "id": "release:2.0.0",
+      "kind": "baseline",
+      "component": "",
+      "record_status": "published",
+      "min_desktop_version": "",
+      "source": "分发数据库发布记录",
+      "previous_version": "1.0.447"
+    },
+    {
+      "id": "hot:20260916174158",
+      "version": "20260916174158",
+      "kind": "web",
+      "updated_at": "2026-09-16T17:41:58+08:00",
+      "record_status": "published",
+      "source": "开发任务/175-独立局域网分发服务与控制面板方案.md",
+      "items": [
+        {
+          "type": "update",
+          "text": "2026-09-16 冷启动画布交互修复热更新"
         }
       ]
     },
     {
+      "id": "hot:20260916172125",
+      "version": "20260916172125",
+      "kind": "web",
+      "updated_at": "2026-09-16T17:21:25+08:00",
+      "record_status": "published",
+      "source": "开发任务/182-旧画布启动缓存阻塞排查与修复.md",
+      "items": [
+        {
+          "type": "update",
+          "text": "2026-09-16 移除旧恢复记录提示"
+        }
+      ]
+    },
+    {
+      "id": "hot:20260916171750",
+      "version": "20260916171750",
+      "kind": "web",
+      "updated_at": "2026-09-16T17:17:50+08:00",
+      "record_status": "published",
+      "source": "开发任务/182-旧画布启动缓存阻塞排查与修复.md",
+      "items": [
+        {
+          "type": "fix",
+          "text": "修复旧画布冷启动缓存阻塞；后台加载失败时允许重新请求，保留未同步的本地编辑。"
+        }
+      ]
+    },
+    {
+      "id": "hot:20260916163603",
+      "version": "20260916163603",
+      "kind": "web",
+      "updated_at": "2026-09-16T16:36:03+08:00",
+      "record_status": "published",
+      "source": "开发任务/175-独立局域网分发服务与控制面板方案.md",
+      "items": [
+        {
+          "type": "update",
+          "text": "2026-09-16 统一画布渲染链路热更新"
+        }
+      ]
+    },
+    {
+      "id": "hot:20260916125636",
+      "version": "20260916125636",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-16T12:56:36+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度运行时自动适配：RTX 50 使用 CUDA 12.8，RTX 20/30/40 使用 CUDA 12.6，不兼容设备自动回退 CPU；运行时清单增加 Ed25519 签名校验。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260916125112",
+      "version": "20260916125112",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-16T12:51:12+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度运行时自动适配：RTX 50 使用 CUDA 12.8，RTX 20/30/40 使用 CUDA 12.6，不兼容设备自动回退 CPU；深度视频运行时改为首次使用时按需下载。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "video-depth-runtime:1.0.0",
+      "version": "1.0.0",
+      "kind": "component",
+      "component": "video-depth-runtime",
+      "record_status": "published",
+      "updated_at": "2026-09-16T12:49:01.886462+08:00",
+      "min_desktop_version": "",
+      "items": [
+        {
+          "type": "update",
+          "text": "按显卡自动适配：RTX 50 使用 CUDA 12.8，RTX 20/30/40 使用 CUDA 12.6，无兼容 CUDA 时回退 CPU。"
+        }
+      ],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260915165028",
+      "version": "20260915165028",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T16:50:28+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "深度视频导出效果修复及局域网更新"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915144642",
+      "version": "20260915144642",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T14:46:42+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "BUG日志采集与自动上报"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915141015",
+      "version": "20260915141015",
+      "kind": "web",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T14:10:15+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "优化多版本补齐流程，后续更新静默按序完成，避免重复弹窗"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915125127",
+      "version": "20260915125127",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:51:27+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "最新累积业务包：支持落后客户端一次确认后自动补齐至当前版本。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915125114",
+      "version": "20260915125114",
+      "kind": "hot-updater",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:51:14+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "更新补齐能力：保存最终目标，跨重启自动继续，并优化差异解包反馈。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915124957",
+      "version": "20260915124957",
+      "kind": "hot-bootstrap",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:49:57+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "升级更新器：支持签名补齐计划与跨重启自动继续。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915123226",
+      "version": "20260915123226",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:32:26+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "单包增量更新：包含当前应用内容，使用快速差异解包、断点续传、签名校验和事务回滚。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915123215",
+      "version": "20260915123215",
+      "kind": "hot-updater",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:32:15+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "优化增量更新体验：只解包变化文件，取消逐文件强制刷盘，并显示处理用时。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915123104",
+      "version": "20260915123104",
+      "kind": "hot-bootstrap",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:31:04+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "升级增量更新器：启用快速差异解包与分阶段更新路由。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915122740",
+      "version": "20260915122740",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T12:27:40+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "优化增量更新体验：仅解包变化文件，移除逐文件强制刷盘，并显示处理用时。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915122653",
+      "version": "20260915122653",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T12:26:53+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "优化增量更新体验：仅解包变化文件，移除逐文件强制刷盘，并显示处理用时。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915122542",
+      "version": "20260915122542",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T12:25:42+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "升级增量更新器：跳过未变化文件并优化本地解包速度。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915121532",
+      "version": "20260915121532",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:15:32+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "单包增量更新：修复局域网下载中断，支持Range断点续传、整包签名校验、逐文件校验和事务回滚。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915121422",
+      "version": "20260915121422",
+      "kind": "hot-bootstrap",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T12:14:22+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "升级局域网更新器：启用单个签名增量包、断点续传与安全解包。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915120623",
+      "version": "20260915120623",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T12:06:23+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "单包增量更新：修复局域网下载中断，支持Range断点续传、整包签名校验、逐文件校验和事务回滚。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915120439",
+      "version": "20260915120439",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-15T12:04:39+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "升级局域网更新器：启用单个签名增量包、断点续传与安全解包。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915114558",
+      "version": "20260915114558",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-15T11:45:58+08:00",
+      "min_desktop_version": "1.0.447",
+      "items": [
+        {
+          "type": "update",
+          "text": "修复局域网热更新下载连接中断：支持自动重试、Range续传，并增强分发服务自恢复。"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260915110530",
+      "version": "20260915110530",
+      "kind": "hot",
+      "updated_at": "2026-09-15T11:05:30+08:00",
+      "record_status": "published",
+      "source": "开发任务/175-独立局域网分发服务与控制面板方案.md",
+      "items": [
+        {
+          "type": "update",
+          "text": "2026-09-15 Lookbook 默认时尚流程热更新"
+        }
+      ]
+    },
+    {
+      "id": "hot:20260914154010",
+      "version": "20260914154010",
+      "kind": "hot",
+      "component": "",
+      "record_status": "published",
+      "updated_at": "2026-09-14T15:40:10+08:00",
+      "min_desktop_version": "1.0.446",
+      "items": [
+        {
+          "type": "update",
+          "text": "局域网热更新与模型分发，签名校验、更新弹窗、自动重启与恢复"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260914153728",
+      "version": "20260914153728",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-14T15:37:28+08:00",
+      "min_desktop_version": "1.0.446",
+      "items": [
+        {
+          "type": "update",
+          "text": "独立局域网分发中心正式接入；签名热更新、异常回滚和自动重启；深度组件自动发现"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "video-depth:20260914153334",
+      "version": "20260914153334",
+      "kind": "component",
+      "component": "video-depth",
+      "record_status": "published",
+      "updated_at": "2026-09-14T15:33:35.214182+08:00",
+      "min_desktop_version": "",
+      "items": [],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "person-depth:20260914153204",
+      "version": "20260914153204",
+      "kind": "component",
+      "component": "person-depth",
+      "record_status": "published",
+      "updated_at": "2026-09-14T15:32:28.401641+08:00",
+      "min_desktop_version": "",
+      "items": [],
+      "source": "分发数据库发布记录"
+    },
+    {
+      "id": "hot:20260914153055",
+      "version": "20260914153055",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-14T15:30:55+08:00",
+      "min_desktop_version": "1.0.446",
+      "items": [
+        {
+          "type": "update",
+          "text": "独立分发中心接入，签名热更新与自动重启"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
+      "id": "hot:20260914152658",
+      "version": "20260914152658",
+      "kind": "hot",
+      "component": "",
+      "record_status": "built",
+      "updated_at": "2026-09-14T15:26:58+08:00",
+      "min_desktop_version": "1.0.446",
+      "items": [
+        {
+          "type": "update",
+          "text": "独立局域网分发中心接入；热更新提示、签名校验与自动重启；移除客户端分发服务器"
+        }
+      ],
+      "source": "本地构建清单"
+    },
+    {
       "version": "1.0.447",
-      "updated_at": "2026-09-14T00:00:00+08:00",
-      "items": []
+      "updated_at": "2026-09-14T16:56:22+08:00",
+      "items": [
+        {
+          "type": "baseline",
+          "text": "安装基线 1.0.446 → 1.0.447。引入内置热更新基线序号，避免新安装或覆盖升级后回灌旧更新。"
+        }
+      ],
+      "kind": "baseline",
+      "previous_version": "1.0.446",
+      "record_status": "published",
+      "source": "Git 发布提交 96f342b2"
     },
     {
       "version": "1.0.446",
@@ -3347,31 +4914,6 @@
       ]
     },
     {
-      "version": "1.0.91",
-      "updated_at": "2026-07-27T22:57:54+08:00",
-      "items": []
-    },
-    {
-      "version": "1.0.90",
-      "updated_at": "2026-07-27T22:57:54+08:00",
-      "items": []
-    },
-    {
-      "version": "1.0.89",
-      "updated_at": "2026-07-27T22:57:54+08:00",
-      "items": []
-    },
-    {
-      "version": "1.0.88",
-      "updated_at": "2026-07-27T22:57:54+08:00",
-      "items": []
-    },
-    {
-      "version": "1.0.87",
-      "updated_at": "2026-07-27T22:57:54+08:00",
-      "items": []
-    },
-    {
       "version": "1.0.86",
       "updated_at": "2026-07-28T22:00:00+08:00",
       "items": [
@@ -3426,6 +4968,31 @@
           "text": "紧凑桌面宽度下参考素材支持横向滚动，生成操作始终完整可见"
         }
       ]
+    },
+    {
+      "version": "1.0.91",
+      "updated_at": "2026-07-27T22:57:54+08:00",
+      "items": []
+    },
+    {
+      "version": "1.0.90",
+      "updated_at": "2026-07-27T22:57:54+08:00",
+      "items": []
+    },
+    {
+      "version": "1.0.89",
+      "updated_at": "2026-07-27T22:57:54+08:00",
+      "items": []
+    },
+    {
+      "version": "1.0.88",
+      "updated_at": "2026-07-27T22:57:54+08:00",
+      "items": []
+    },
+    {
+      "version": "1.0.87",
+      "updated_at": "2026-07-27T22:57:54+08:00",
+      "items": []
     },
     {
       "version": "1.0.78",

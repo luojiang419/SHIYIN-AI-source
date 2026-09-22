@@ -121,6 +121,13 @@
             .update-history-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
             .update-history-meta strong { font-size:15px; letter-spacing:.2px; }
             .update-history-badge { padding:3px 8px; border-radius:20px; background:#22a06b18; color:#229765; font-size:10px; font-weight:600; }
+            .update-history-type { font-size:10px; padding:3px 8px; border-radius:6px; border:1px solid var(--history-line); opacity:.75; }
+            .update-history-type[data-kind="baseline"] { color:#ba873b; border-color:#ba873b55; background:#ba873b0b; }
+            .update-history-filters { display:flex; gap:7px; flex-wrap:wrap; margin:0 0 24px; }
+            .update-history-filters button { font:inherit; font-size:11px; color:inherit; border:1px solid var(--history-line); border-radius:20px; background:transparent; padding:6px 11px; cursor:pointer; }
+            .update-history-filters button[aria-pressed="true"] { background:#22a06b18; color:#229765; border-color:#22976566; }
+            .update-history-entry[hidden] { display:none; }
+            .update-history-meta strong { overflow-wrap:anywhere; }
             .update-history-card { border:1px solid var(--history-line); background:color-mix(in srgb,currentColor 2%,transparent); border-radius:12px; padding:15px 17px; }
             .update-history-card ul { padding-left:16px; margin:0; font-size:12px; line-height:1.85; }
             .update-history-card li+li { margin-top:8px; }
@@ -173,14 +180,15 @@
         const add = entry => {
             if (!entry || typeof entry !== 'object' || !entry.version) return;
             const version = String(entry.version).replace(/^v/i, '');
-            if (!entries.has(version)) entries.set(version, {...entry, version});
+            const identity = entry.id || `release:${version}`;
+            if (!entries.has(identity)) entries.set(identity, {...entry, version});
         };
         const archive = loaded[0].status === 'fulfilled' ? loaded[0].value : {};
         (Array.isArray(archive.history) ? archive.history : []).forEach(add);
         const current = loaded[1].status === 'fulfilled' ? loaded[1].value : {};
         (Array.isArray(current.history) ? current.history : []).forEach(add);
         // 旧日志为累计列表；只把尚未归档的新内容归入新版本。
-        if (current.version && !entries.has(String(current.version).replace(/^v/i, ''))) {
+        if (current.version && ![...entries.values()].some(entry => entry.kind !== 'component' && entry.version === String(current.version).replace(/^v/i, ''))) {
             const known = new Set([...entries.values()].flatMap(e => Array.isArray(e.items) ? e.items : []).map(x => typeof x === 'string' ? x : x?.text));
             add({...current, items: (Array.isArray(current.items) ? current.items : []).filter(x => !known.has(typeof x === 'string' ? x : x?.text))});
         }
@@ -198,21 +206,51 @@
         const list = document.createElement('ol');
         list.className = 'update-history-list';
         const ordered = [...entries.values()].sort((a,b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0) || b.version.localeCompare(a.version, undefined, {numeric:true}));
-        heading.querySelector('span').textContent = `${ordered.length} 个版本 · 由新到旧`;
+        const filters = document.createElement('div');
+        filters.className = 'update-history-filters';
+        filters.setAttribute('role', 'group');
+        filters.setAttribute('aria-label', '日志类型');
+        const labels = {baseline:'基线切换', hot:'完整热更新', web:'纯前端热更新', 'hot-updater':'更新器热更新', 'hot-bootstrap':'历史引导更新', component:'组件更新', release:'版本更新'};
+        const components = {'person-depth':'人物深度模型', 'video-depth':'深度视频模型', 'video-depth-runtime':'深度视频运行时', 'cutout-runtime':'抠图运行时'};
+        const group = entry => ['hot','web','hot-updater','hot-bootstrap'].includes(entry.kind) ? 'hot' : entry.kind || 'release';
+        const select = value => {
+            let count = 0;
+            [...list.children].forEach(row => { row.hidden = value !== 'all' && row.dataset.group !== value; if (!row.hidden) count++; });
+            filters.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.filter === value)));
+            heading.querySelector('span').textContent = `${count} 条记录 · 由新到旧`;
+        };
+        for (const [value,label] of [['all','全部'],['baseline','基线切换'],['hot','热更新'],['component','组件'],['release','版本更新']]) {
+            const button = document.createElement('button');
+            button.type = 'button'; button.dataset.filter = value; button.textContent = label;
+            button.addEventListener('click', () => select(value));
+            filters.append(button);
+        }
+        heading.after(filters);
         for (const entry of ordered) {
             const row = document.createElement('li');
             row.className = 'update-history-entry';
+            row.dataset.group = group(entry);
             row.innerHTML = '<div class="update-history-meta"><strong></strong><time class="update-history-date"></time></div><div class="update-history-card"></div>';
-            row.querySelector('strong').textContent = `v${entry.version}`;
+            row.querySelector('strong').textContent = entry.kind === 'component' ? `${components[entry.component] || '组件'} · ${entry.version}` : /^\d{14}$/.test(entry.version) ? entry.version : `v${entry.version}`;
+            const type = document.createElement('span');
+            type.className = 'update-history-type'; type.dataset.kind = entry.kind || 'release';
+            type.textContent = labels[entry.kind] || labels.release;
+            row.querySelector('.update-history-meta').append(type);
             const date = row.querySelector('time');
             const timestamp = Date.parse(entry.updated_at);
             date.textContent = Number.isFinite(timestamp) ? new Intl.DateTimeFormat('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',timeZone:'Asia/Shanghai'}).format(timestamp) : '日期未记录';
             if (Number.isFinite(timestamp)) date.dateTime = new Date(timestamp).toISOString();
-            if (entry.version === String(result.currentVersion).replace(/^v/i,'')) {
+            if (entry.kind !== 'component' && entry.record_status !== 'failed' && entry.version === String(result.currentVersion).replace(/^v/i,'')) {
                 const badge = document.createElement('span');
                 badge.className = 'update-history-badge';
                 badge.textContent = '当前版本';
                 row.querySelector('.update-history-meta').append(badge);
+            }
+            if (['built', 'failed'].includes(entry.record_status)) {
+                const status = document.createElement('span');
+                status.className = 'update-history-type';
+                status.textContent = entry.record_status === 'failed' ? '未发布 · 校验失败' : '构建记录';
+                row.querySelector('.update-history-meta').append(status);
             }
             const card = row.querySelector('.update-history-card');
             const items = (Array.isArray(entry.items) ? entry.items : []).map(x => typeof x === 'string' ? x : x?.text || x?.title).filter(x => typeof x === 'string' && x.trim());
@@ -235,6 +273,7 @@
             list.append(row);
         }
         content.append(list);
+        select('all');
     }
 
     async function checkAndDownload(options = {}) {

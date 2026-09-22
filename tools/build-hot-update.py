@@ -15,6 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from distribution.service import atomic_json, digest, DEFAULT_DATA
+from tools.update_history import make_record, stage_record, commit_record
 
 DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION = '2.0.5'
 
@@ -124,6 +125,9 @@ def main():
             shutil.copytree(backend,files/'app/backend/canvas-backend')
             shutil.copy2(desktop,files/'SHIYIN AI.exe')
             roots.append('app/backend/canvas-backend')
+    history_kind = 'hot-bootstrap' if args.bootstrap else 'hot-updater' if args.updater_only else 'web' if args.web_only else 'hot'
+    history_record = make_record(history_kind, args.version, args.notes, min_version=args.min_desktop_version)
+    stage_record(ROOT, files/'app/web/update-history.json', history_record)
     manifest={'protocol_version':2 if args.bootstrap else 3,'version':args.version,'min_desktop_version':args.min_desktop_version,'notes':args.notes,'prune_roots':roots,'files':[]}
     for path in sorted(files.rglob('*')):
         if path.is_file():manifest['files'].append({'path':path.relative_to(files).as_posix(),'size':path.stat().st_size,'sha256':digest(path)})
@@ -141,6 +145,7 @@ def main():
         manifest['package']={'name':package_name,'size':package.stat().st_size,'sha256':digest(package)}
     atomic_json(snapshot/'manifest.json',manifest)
     atomic_json(cache,state)
+    commit_record(ROOT, history_record)
     if args.publish:
         token=(DEFAULT_DATA/'admin-token').read_text('ascii')
         if not args.allow_incompatible_clients:

@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const path=require('node:path');
 const root=path.resolve(__dirname,'../..');
 
-async function backgroundCase({reuse=false, uploadError=false, autoSubmit=false, submitError=false}={}){
+async function backgroundCase({reuse=false, uploadError=false, autoSubmit=false, submitError=false, noTab=false}={}){
   const calls=[],requests=[],status={enabled:true,base:'http://127.0.0.1:3000'};
   const draft={auto_submit:autoSubmit,settings:{duration:5,resolution:'1080p',aspect_ratio:'16:9',generate_audio:false},id:'draft-1',lease:'lease-1',prompt:'参考视频1和图片1',references:[
     {url:'/assets/a.mp4',kind:'video'}, {url:'/assets/b.png',kind:'image'}]};
@@ -18,7 +18,7 @@ async function backgroundCase({reuse=false, uploadError=false, autoSubmit=false,
       return {ok:true,blob:async()=>new Blob(['test-binary'],{type:String(url).endsWith('.mp4')?'video/mp4':'image/png'})};
     },
     chrome:{storage:{local:{get:async()=>status,set:async data=>Object.assign(status,data)}},
-      tabs:{query:async()=>[{id:12,active:true}],update:async()=>{},get:async()=>({status:'complete'})},
+      tabs:{query:async()=>noTab?[]:[{id:12,active:true}],create:async options=>{assert.equal(options.active,false);return {id:12};},update:async()=>{throw Error('must not activate tab');},get:async()=>({status:'complete'})},
       scripting:{executeScript:async options=>{
         if(options.files) return [];
         const [method,args]=options.args;calls.push({method,args});
@@ -66,7 +66,7 @@ async function canvasCase(type){
 }
 (async()=>{
   await backgroundCase();await backgroundCase({reuse:true});await backgroundCase({uploadError:true});
-  await backgroundCase({autoSubmit:true});await backgroundCase({autoSubmit:true,submitError:true});
+  await backgroundCase({noTab:true});await backgroundCase({autoSubmit:true});await backgroundCase({autoSubmit:true,submitError:true});
   await canvasCase('video');await canvasCase('film-video');
-  console.log('7 runtime cases passed: transfer, reuse, upload failure, one-click submit, uncertain receipt, canvas, film canvas');
+  console.log('8 runtime cases passed (including background tab creation): transfer, reuse, upload failure, one-click submit, uncertain receipt, canvas, film canvas');
 })().catch(error=>{console.error(error);process.exitCode=1;});

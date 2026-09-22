@@ -5,6 +5,7 @@ import time
 import os
 import shutil
 import subprocess
+import asyncio
 from pathlib import Path
 from threading import RLock
 from urllib.parse import urlsplit
@@ -117,6 +118,16 @@ class DraftQueue:
 def create_router(identity, resolve_media=None):
     router = APIRouter(prefix="/api/kling-web", tags=["kling-web"])
     queue = DraftQueue()
+    channels = {}
+
+    def channel_item(request):
+        token = request.headers.get('authorization', '').removeprefix('Bearer ')
+        channel = channels.get(token)
+        if not channel or channel['expires'] < time.time():
+            channels.pop(token, None)
+            raise HTTPException(401, '后台连接已过期，请从画布重新发送')
+        channel['seen'] = time.time()
+        return channel
 
     @router.post("/drafts")
     async def create(payload: WebDraft, request: Request):
@@ -142,7 +153,26 @@ def create_router(identity, resolve_media=None):
                 raise HTTPException(401, '任务连接凭据无效或已过期，请从画布重新发送')
             return item
 
-    router.bridge_account = lambda request: ticket_item(request)['owner']
+    router.bridge_account = lambda request: (channel_item(request) if request.url.path.endswith('/transport/poll') else ticket_item(request))['owner']
+
+    @router.post('/transport/channel')
+    async def channel_register(request: Request):
+        item = ticket_item(request)
+        now = time.time()
+        for token, channel in list(channels.items()):
+            if channel['expires'] < now or channel['owner'] == item['owner']:
+                del channels[token]
+        token = secrets.token_urlsafe(32)
+        channels[token] = {'owner': item['owner'], 'seen': now, 'expires': now + 86400}
+        return {'channel': token}
+
+    @router.post('/transport/poll')
+    async def channel_poll(request: Request):
+        owner = channel_item(request)['owner']
+        with queue.lock:
+            queue.clean()
+            item = next((x for x in queue.items.values() if x['owner'] == owner and x['status'] == 'queued'), None)
+            return {'ticket': item['ticket'] if item else None}
 
     @router.get('/connect', response_class=HTMLResponse)
     async def connect():
@@ -153,7 +183,7 @@ def create_router(identity, resolve_media=None):
         if request.client.host not in {'127.0.0.1', '::1', 'testclient'}:
             raise HTTPException(403, '远程 Web 请在当前浏览器打开交接页')
         item = queue.get(identity(request).account_id, key)
-        port = request.url.port
+        port = request.url.port or 80
         url = f'http://127.0.0.1:{port}/api/kling-web/connect#' + item['ticket']
         candidates = [shutil.which('chrome')]
         for base in ('PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'):
@@ -161,8 +191,26 @@ def create_router(identity, resolve_media=None):
         chrome = next((p for p in candidates if p and Path(p).is_file()), None)
         if not chrome:
             raise HTTPException(409, '未找到 Chrome，请在 Chrome 中打开 Web 画布')
-        subprocess.Popen([chrome, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return {'opened': True}
+        def launch():
+            startup = None
+            if os.name == 'nt':
+                startup = subprocess.STARTUPINFO()
+                startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startup.wShowWindow = 7  # SW_SHOWMINNOACTIVE，不激活窗口。
+            subprocess.Popen([chrome, '--new-window', '--start-minimized', url],
+                             startupinfo=startup, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        connected = any(c['owner'] == item['owner'] and c['expires'] > time.time() and time.time()-c['seen'] < 75 for c in channels.values())
+        if connected:
+            async def fallback():
+                await asyncio.sleep(40)
+                # Chrome 若刚退出，心跳仍可能新鲜；仅尚未领取的任务允许唤起。
+                if item['status'] == 'queued' and time.time()-item['created_at'] < 300:
+                    launch()
+            asyncio.create_task(fallback())
+            return {'opened': False, 'background': True}
+        launch()
+        return {'opened': True, 'background': True}
 
     @router.post('/transport/claim')
     async def ticket_claim(request: Request):

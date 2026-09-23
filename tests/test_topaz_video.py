@@ -14,6 +14,8 @@ from canvas_core.topaz_video import (
     available_topaz_models,
     build_topaz_upscale_command,
     candidate_topaz_install_dirs,
+    candidate_topaz_model_dirs,
+    candidate_topaz_model_data_dirs,
     humanize_topaz_ffmpeg_error,
     parse_ffmpeg_progress,
     parse_ffprobe_video,
@@ -79,6 +81,23 @@ class TopazVideoTests(unittest.TestCase):
         with patch.dict(os.environ, {"TOPAZ_VIDEO_AI_DIR": "D:/Topaz/ffmpeg.exe"}, clear=False):
             candidates = candidate_topaz_install_dirs()
         self.assertEqual(candidates[0], Path("D:/Topaz"))
+
+    def test_current_topaz_install_and_model_paths_precede_legacy_paths(self):
+        with patch.dict(os.environ, {"ProgramFiles": "D:/Program Files", "PROGRAMDATA": "C:/ProgramData"}, clear=False):
+            installs = candidate_topaz_install_dirs()
+            definitions = candidate_topaz_model_dirs()
+        self.assertLess(installs.index(Path("D:/Program Files/Topaz Labs LLC/Topaz Video")),
+                        installs.index(Path("D:/Program Files/Topaz Labs LLC/Topaz Video AI")))
+        self.assertLess(definitions.index(Path("C:/ProgramData/Topaz Labs LLC/Topaz Video/models")),
+                        definitions.index(Path("C:/ProgramData/Topaz Labs LLC/Topaz Video AI/models")))
+
+    def test_model_data_uses_current_registry_path_before_definition_fallback(self):
+        with (
+            patch.dict(os.environ, {"TVAI_MODEL_DATA_DIR": ""}, clear=False),
+            patch("canvas_core.topaz_video.registry_topaz_model_data_dir", return_value=Path("D:/Topaz/models")),
+        ):
+            candidates = candidate_topaz_model_data_dirs()
+        self.assertEqual(candidates[0], Path("D:/Topaz/models"))
 
     def test_filter_probe_uses_argument_array_without_shell(self):
         def runner(args, **kwargs):

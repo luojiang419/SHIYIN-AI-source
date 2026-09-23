@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterable
 
 TOPAZ_VENDOR = "Topaz Labs LLC"
 TOPAZ_PRODUCT_DIR = Path("Topaz Labs LLC") / "Topaz Video AI"
+TOPAZ_CURRENT_PRODUCT_DIR = Path("Topaz Labs LLC") / "Topaz Video"
 TOPAZ_UPSCALE_FILTER = "tvai_up"
 TOPAZ_MODEL_PREFIXES = frozenset(
     {
@@ -212,16 +213,16 @@ def candidate_topaz_install_dirs(configured_dir: str = "") -> list[Path]:
     configured = str(configured_dir or os.environ.get("TOPAZ_VIDEO_AI_DIR") or "").strip().strip('"')
     if configured:
         candidate = Path(configured).expanduser()
-        candidates.append(candidate.parent if candidate.name.lower() in {"ffmpeg.exe", "topaz video ai.exe"} else candidate)
+        candidates.append(candidate.parent if candidate.name.lower() in {"ffmpeg.exe", "topaz video ai.exe", "topaz video.exe"} else candidate)
     for variable in ("ProgramW6432", "ProgramFiles"):
         value = str(os.environ.get(variable) or "").strip()
         if value:
-            candidates.append(Path(value) / TOPAZ_PRODUCT_DIR)
+            candidates.extend((Path(value) / TOPAZ_CURRENT_PRODUCT_DIR, Path(value) / TOPAZ_PRODUCT_DIR))
     if os.name == "nt":
         for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
             drive = Path(f"{letter}:\\")
             if drive.exists():
-                candidates.append(drive / "Program Files" / TOPAZ_PRODUCT_DIR)
+                candidates.extend((drive / "Program Files" / TOPAZ_CURRENT_PRODUCT_DIR, drive / "Program Files" / TOPAZ_PRODUCT_DIR))
     return _unique_paths(candidates)
 
 
@@ -232,12 +233,15 @@ def registry_topaz_model_data_dir() -> Path | None:
         import winreg
     except ImportError:
         return None
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Topaz Labs LLC\Topaz Video AI") as key:
-            value = str(winreg.QueryValueEx(key, "veaiDataFolder")[0]).strip()
-    except OSError:
-        return None
-    return Path(value).expanduser() if value else None
+    for product in ("Topaz Video", "Topaz Video AI"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Topaz Labs LLC\{product}") as key:
+                value = str(winreg.QueryValueEx(key, "veaiDataFolder")[0]).strip()
+        except OSError:
+            continue
+        if value:
+            return Path(value).expanduser()
+    return None
 
 
 def candidate_topaz_model_dirs() -> list[Path]:
@@ -247,9 +251,9 @@ def candidate_topaz_model_dirs() -> list[Path]:
         candidates.append(Path(configured).expanduser())
     program_data = str(os.environ.get("PROGRAMDATA") or "").strip()
     if program_data:
-        candidates.append(Path(program_data) / TOPAZ_PRODUCT_DIR / "models")
+        candidates.extend((Path(program_data) / TOPAZ_CURRENT_PRODUCT_DIR / "models", Path(program_data) / TOPAZ_PRODUCT_DIR / "models"))
     if os.name == "nt":
-        candidates.append(Path("C:/ProgramData") / TOPAZ_PRODUCT_DIR / "models")
+        candidates.extend((Path("C:/ProgramData") / TOPAZ_CURRENT_PRODUCT_DIR / "models", Path("C:/ProgramData") / TOPAZ_PRODUCT_DIR / "models"))
     return _unique_paths(candidates)
 
 

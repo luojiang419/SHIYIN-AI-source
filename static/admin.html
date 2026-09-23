@@ -13,7 +13,6 @@
     .mark{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:#302f2b;color:#fff;font-weight:800}.title h1{margin:0;font-size:22px}.title p{margin:5px 0 0;color:#787269;font-size:13px}
     .head-actions{display:flex;gap:9px}.btn{border:1px solid #d7d0c4;border-radius:10px;padding:9px 14px;background:#fff;color:#39352f;text-decoration:none}.btn.primary{background:#302f2b;color:#fff;border-color:#302f2b}.btn.danger{color:#9b3b34}.btn:disabled{opacity:.5;cursor:wait}
     .notice{padding:12px 15px;border:1px solid #ded6c9;border-radius:12px;background:#fff9e9;color:#665b44;font-size:13px;margin-bottom:18px}
-    .model-panel{margin-bottom:18px}.model-body{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px 18px;align-items:center;padding:16px 19px}.model-copy strong{display:block;font-size:14px}.model-copy span{display:block;color:#7c756b;font-size:12px;margin-top:5px;line-height:1.5}.progress-track{height:8px;border-radius:999px;background:#e9e3da;overflow:hidden;margin-top:10px}.progress-fill{height:100%;width:0;background:#4e7660;transition:width .25s}.model-detail{grid-column:1/-1;color:#8c8479;font-size:11px;word-break:break-all}.status-ready{color:#377a52!important}.status-failed{color:#ad3c34!important}
     .layout{display:grid;grid-template-columns:minmax(540px,1.05fr) minmax(440px,.95fr);gap:18px;align-items:start}.panel{border:1px solid #ddd6ca;border-radius:17px;background:rgba(255,255,255,.88);box-shadow:0 12px 38px rgba(62,54,43,.07);overflow:hidden}
     .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 19px;border-bottom:1px solid #e7e1d7}.panel-head h2{font-size:16px;margin:0}.panel-head span{color:#898278;font-size:12px}
     .account-list{padding:8px 12px 14px}.account-row{display:grid;grid-template-columns:1.05fr 1.25fr auto;gap:10px;align-items:end;padding:13px 7px;border-bottom:1px solid #eee8de}.account-row:last-child{border-bottom:0}
@@ -36,14 +35,6 @@
       <div class="head-actions"><a class="btn" href="/">返回工作台</a><button class="btn danger" id="logoutBtn" type="button">退出管理员</button></div>
     </header>
     <div class="notice">首次在本机注册的账号为管理员，可修改账号密码和管理普通用户。管理员账号不能禁用。账号支持中文、英文字母和数字，英文字母不区分大小写；密码不能为空。修改密码后，该账号的登录状态会失效，需要使用新密码重新登录。</div>
-    <section class="panel model-panel">
-      <div class="panel-head"><h2>DWPose 本地模型</h2><span id="dwposeState">正在检查</span></div>
-      <div class="model-body">
-        <div class="model-copy"><strong id="dwposeMessage">正在读取模型状态…</strong><span id="dwposeProgressText">模型缺失时会优先通过国内镜像自动补齐，升级后继续复用。</span><div class="progress-track"><div class="progress-fill" id="dwposeProgress"></div></div></div>
-        <button class="btn" id="dwposeRetry" type="button">重新检查</button>
-        <div class="model-detail" id="dwposeDetail"></div>
-      </div>
-    </section>
     <main class="layout">
       <section class="panel">
         <div class="panel-head"><h2>已注册账号</h2><span id="accountCount">0 个账号</span></div>
@@ -62,8 +53,6 @@
     const accountMessage = document.getElementById('accountMessage');
     const resourceBody = document.getElementById('resourceBody');
     const resourceMessage = document.getElementById('resourceMessage');
-    const dwposeRetry = document.getElementById('dwposeRetry');
-    let dwposeTimer = 0;
     let accounts = [];
     let activeAccountId = new URLSearchParams(location.search).get('account_id') || '';
     let activeScope = '';
@@ -90,24 +79,6 @@
       const label=el('label','',labelText); const input=el('input','field');
       input.type='text'; input.inputMode='text'; input.autocomplete='off'; input.spellcheck=false; input.value=String(value??'');
       label.append(input); return {label,input};
-    }
-    function renderDwposeStatus(status){
-      const stateNames={idle:'等待检查',checking:'正在校验',downloading:'正在下载',ready:'已就绪',failed:'补齐失败'};
-      const state=String(status.state||'idle'); const progress=Math.max(0,Math.min(1,Number(status.progress||0)));
-      const stateNode=document.getElementById('dwposeState'); stateNode.textContent=stateNames[state]||state;
-      stateNode.className=state==='ready'?'status-ready':state==='failed'?'status-failed':'';
-      document.getElementById('dwposeMessage').textContent=status.message||'等待检查 DWPose 模型';
-      document.getElementById('dwposeProgress').style.width=`${(progress*100).toFixed(1)}%`;
-      const downloaded=formatSize(status.downloaded_bytes||0); const total=formatSize(status.total_bytes||0);
-      document.getElementById('dwposeProgressText').textContent=state==='ready'?`两个模型已持久化，共 ${total}，软件升级后无需重新下载。`:`已处理 ${downloaded} / ${total}（${Math.round(progress*100)}%）`;
-      const detail=[]; if(status.source_label)detail.push(`当前来源：${status.source_label}`); if(status.error)detail.push(`失败原因：${status.error}`);
-      document.getElementById('dwposeDetail').textContent=detail.join(' · ');
-      dwposeRetry.disabled=state==='checking'||state==='downloading'; dwposeRetry.textContent=state==='failed'?'重新下载':'重新检查';
-      clearTimeout(dwposeTimer); if(state==='checking'||state==='downloading')dwposeTimer=setTimeout(loadDwposeStatus,1500);
-    }
-    async function loadDwposeStatus(){
-      try{renderDwposeStatus(await api('/api/admin/dwpose/status'));}
-      catch(error){document.getElementById('dwposeMessage').textContent=error.message;document.getElementById('dwposeState').textContent='读取失败';}
     }
     function renderAccounts(){
       accountList.replaceChildren(); document.getElementById('accountCount').textContent=`${accounts.length} 个账号`;
@@ -180,9 +151,7 @@
       catch(error){resourceBody.replaceChildren(el('div','empty',error.message));setMessage(resourceMessage,error.message,'error');}
     }
     document.getElementById('logoutBtn').onclick=async()=>{try{await fetch('/api/account/logout',{method:'POST'});}finally{location.replace('/login');}};
-    dwposeRetry.onclick=async()=>{dwposeRetry.disabled=true;try{const data=await api('/api/admin/dwpose/retry',{method:'POST'});renderDwposeStatus(data.status||{});}catch(error){document.getElementById('dwposeMessage').textContent=error.message;dwposeRetry.disabled=false;}};
     loadAccounts();
-    loadDwposeStatus();
   </script>
 </body>
 </html>

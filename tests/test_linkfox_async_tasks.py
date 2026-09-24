@@ -37,6 +37,56 @@ def test_native_submit_query_uses_verified_protocol(mode, path):
     assert calls == [path, '/aigc/taskQuery']
 
 
+def test_mini_uses_official_v3_response_and_preserves_large_task_id():
+    task_id = '2103060316882571264'
+    calls = []
+    def handler(request):
+        body = json.loads(request.content)
+        calls.append(request.url.path)
+        assert request.headers['Authorization'] == 'Bearer test-only'
+        if request.url.path == '/image/v3/make/imageToVideo':
+            assert body['videoType'] == 'doubao-seedance-2-0-mini'
+            assert body['imageList'] == ['https://example.com/input.png']
+            assert 'isPro' not in body and 'camera' not in body
+            return httpx.Response(200, json={'code': 200, 'data': {'id': task_id}})
+        assert body == {'id': task_id}
+        return httpx.Response(200, json={'code': 200, 'data': {'id': task_id, 'status': 3,
+            'count': 35, 'resultList': [{'url': 'https://example.com/result.mp4'}]}})
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            submitted = await lf.submit_task({'entry': 'img2video', 'mode': 'reference',
+                'imageList': ['https://example.com/input.png'], 'videoType': 'seedance2.0mini',
+                'videoTime': 5, 'resolution': '480p', 'aspectRatio': '16:9'},
+                client=client, api_key='test-only', gateway='https://tool-gateway.linkfox.com')
+            assert submitted['upstream_task_id'] == task_id
+            queried = await lf.query_task(task_id, client=client, api_key='test-only', gateway=submitted['base_url'])
+            assert queried['status'] == 'succeeded'
+            assert queried['credits_consumed'] == 35
+            assert queried['url'] == 'https://example.com/result.mp4'
+    asyncio.run(exercise())
+    assert calls == ['/image/v3/make/imageToVideo', '/image/v2/make/info']
+
+
+@pytest.mark.parametrize('body,expected', [
+    ({'code': 200, 'data': {'total': 100, 'usage': 35, 'expireTime': 20270904}}, 65),
+    ({'code': 200, 'data': {'total': 100, 'usage': 100}}, 0),
+    ({'code': 401, 'msg': 'unauthorized'}, None),
+    ({'code': 200, 'data': {'total': 100, 'usage': '35'}}, None),
+])
+def test_linkfox_balance_never_invents_unknown_points(monkeypatch, body, expected):
+    original_client = httpx.AsyncClient
+    def handler(request):
+        assert request.url.path == '/v1/userPlan/info'
+        assert request.headers['Authorization'] == 'Bearer test-only'
+        return httpx.Response(200, json=body)
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(main, 'linkfox_configured_key', lambda: 'test-only')
+    monkeypatch.setattr(main.httpx, 'AsyncClient', lambda **kwargs: original_client(transport=transport, **kwargs))
+    result = asyncio.run(main.linkfox_balance())
+    assert result['remaining_points'] == expected
+    assert result['available'] == (expected is not None)
+
+
 @pytest.mark.parametrize('body,expected', [
     ({'errcode': 401, 'errmsg': 'authorized error'}, 'authorized error'),
     ({'errcode': 200}, '未知任务状态'),

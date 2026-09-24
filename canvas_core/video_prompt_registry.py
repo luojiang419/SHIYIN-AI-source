@@ -21,7 +21,7 @@ def is_seedance_2_model(provider: str, model: str) -> bool:
     compact = re.sub(r'[^a-z0-9]+', '', str(model or '').lower())
     if compact.startswith('doubao'):
         compact = compact[6:]
-    return bool(re.fullmatch(r'seedance20(?:fast|pro)?(?:vip)?(?:\d{6})?', compact))
+    return bool(re.fullmatch(r'seedance20(?:fast|mini|pro)?(?:vip)?(?:\d{6})?', compact))
 
 
 def is_seedance_25_model(provider: str, model: str) -> bool:

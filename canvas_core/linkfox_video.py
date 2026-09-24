@@ -29,6 +29,8 @@ class LinkFoxVideoError(ValueError):
 MODEL_ALIASES = {
     "seedance2.0": "seedance2.0",
     "seedance2.0fast": "seedance2.0fast",
+    "seedance2.0mini": "seedance2.0mini",
+    "doubao-seedance-2-0-mini": "seedance2.0mini",
     "seed": "seedance2.0",
     "seed_fast": "seedance2.0fast",
     "可灵omni": "可灵Omni",
@@ -42,11 +44,12 @@ MODEL_ALIASES = {
     "可灵2.6": "可灵2.6",
 }
 
-REFERENCE_MULTI_MODELS = {"seedance2.0", "seedance2.0fast", "可灵Omni", "HappyHorse"}
+REFERENCE_MULTI_MODELS = {"seedance2.0", "seedance2.0fast", "seedance2.0mini", "可灵Omni", "HappyHorse"}
 REFERENCE_SINGLE_MODELS = {"海螺2.3", "wan2.6"}
-FIRST_LAST_MODELS = {"seedance2.0", "seedance2.0fast", "可灵2.6"}
+FIRST_LAST_MODELS = {"seedance2.0", "seedance2.0fast", "seedance2.0mini", "可灵2.6"}
 API_MODEL_TYPES = {
-    "seedance2.0": "SEED", "seedance2.0fast": "SEED_FAST", "可灵Omni": "KLING",
+    "seedance2.0": "SEED", "seedance2.0fast": "SEED_FAST",
+    "seedance2.0mini": "doubao-seedance-2-0-mini", "可灵Omni": "KLING",
     "可灵2.6": "KLING", "HappyHorse": "HAPPY_HORSE", "海螺2.3": "HAILUO", "wan2.6": "WAN",
 }
 
@@ -56,6 +59,10 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
         "ratios": ("16:9", "9:16", "adaptive"), "voice": "optional", "max_images": 9,
     },
     "seedance2.0fast": {
+        "durations": (5, 10, 15), "resolutions": ("480p", "720p"),
+        "ratios": ("16:9", "9:16"), "voice": "optional", "max_images": 9,
+    },
+    "seedance2.0mini": {
         "durations": (5, 10, 15), "resolutions": ("480p", "720p"),
         "ratios": ("16:9", "9:16"), "voice": "optional", "max_images": 9,
     },
@@ -338,11 +345,42 @@ async def _gateway_post(client, gateway: str, api_key: str, path: str, payload: 
     return body
 
 
+LINKFOX_V3_API_BASE = 'https://ai-api.linkfox.com'
+
+
+async def _v3_post(client, api_key: str, path: str, payload: dict) -> dict:
+    if not api_key:
+        raise LinkFoxVideoError('请先在 API 设置中配置 LinkFox API Key')
+    response = await client.post(LINKFOX_V3_API_BASE + path,
+        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+        json=payload, timeout=150)
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise LinkFoxVideoError(f'LinkFox V3 返回无效 JSON（HTTP {response.status_code}）') from exc
+    if not isinstance(body, dict):
+        raise LinkFoxVideoError('LinkFox V3 返回数据格式错误')
+    if response.status_code >= 400 or body.get('code') not in (200, '200'):
+        reason = body.get('msg') or body.get('msgKey') or '请求失败'
+        raise LinkFoxVideoError(f'LinkFox V3：{reason}（HTTP {response.status_code}，code={body.get("code")}）')
+    return body
+
+
 async def submit_task(raw, *, client, api_key: str, gateway: str) -> dict:
     """只提交一次；网络结果不明时由调用方保留本地记录，禁止自动重提。"""
     payload, kind = normalize_request(raw)
     api_payload = {k: v for k, v in payload.items() if k not in {'entry', 'mode'}}
     api_payload['videoType'] = API_MODEL_TYPES[payload['videoType']]
+    if payload['videoType'] == 'seedance2.0mini':
+        # V3 使用 data.id 和统一结果查询；旧技能网关没有 Mini 模型。
+        api_payload.pop('isPro', None)
+        api_payload.pop('camera', None)
+        body = await _v3_post(client, api_key, '/image/v3/make/imageToVideo', api_payload)
+        task_id = str((body.get('data') or {}).get('id') or '').strip()
+        if not task_id:
+            raise LinkFoxVideoError('LinkFox V3 未返回 data.id，提交结果无法确认；请核对平台记录后再试')
+        return {'upstream_task_id': task_id, 'base_url': LINKFOX_V3_API_BASE,
+                'status': 'PROCESSING', 'credits_consumed': None, 'request': payload, 'raw': body}
     path = '/aigc/multiImageVideoGenAsync' if kind == 'multi' else '/aigc/videoGenAsync'
     body = await _gateway_post(client, gateway, api_key, path, api_payload)
     task_id = str(body.get('taskId') or '').strip()
@@ -353,6 +391,24 @@ async def submit_task(raw, *, client, api_key: str, gateway: str) -> dict:
 
 
 async def query_task(task_id: str, *, client, api_key: str, gateway: str) -> dict:
+    if gateway.rstrip('/') == LINKFOX_V3_API_BASE:
+        body = await _v3_post(client, api_key, '/image/v2/make/info', {'id': task_id})
+        data = body.get('data')
+        if not isinstance(data, dict):
+            raise LinkFoxVideoError('LinkFox V3 查询结果缺少 data')
+        if str(data.get('id') or '') != task_id:
+            raise LinkFoxVideoError('LinkFox V3 返回的任务 ID 与查询任务不一致')
+        status = data.get('status')
+        if status not in (1, 2, 3, 4):
+            raise LinkFoxVideoError(f'LinkFox V3 返回未知任务状态：{status}')
+        urls = [str(item.get('url') or '') for item in data.get('resultList') or [] if isinstance(item, dict)]
+        url = next((item for item in urls if item.startswith(('http://', 'https://'))), '')
+        error = str(data.get('errorMsg') or '视频生成失败') if status == 4 else ''
+        if status == 3 and not url:
+            error = 'LinkFox V3 任务成功但没有返回视频地址'
+        return {'status': 'failed' if error else 'succeeded' if status == 3 else 'running',
+                'upstream_status': str(status), 'url': url, 'error': error,
+                'credits_consumed': data.get('count') if status == 3 else None, 'raw': body}
     body = await _gateway_post(client, gateway, api_key, '/aigc/taskQuery', {'taskId': task_id})
     if body.get('taskId') and str(body['taskId']) != task_id:
         raise LinkFoxVideoError('LinkFox 返回的 taskId 与查询任务不一致')

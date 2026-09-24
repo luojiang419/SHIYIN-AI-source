@@ -3,7 +3,9 @@ const source=fs.readFileSync('static/js/canvas-linkfox-video.js','utf8');
 function environment(responder){
     const calls=[],ctx={window:{},document:{querySelectorAll:()=>[]},AbortController,
         setTimeout:(fn,ms)=>{if(ms===2500)queueMicrotask(fn);return 1;},clearTimeout:()=>{},
-        fetch:async(url,opts)=>{calls.push([url,opts]);return responder(url,opts);}};
+        fetch:async(url,opts)=>{calls.push([url,opts]);return url==='/api/linkfox/balance'
+            ? {ok:true,status:200,json:async()=>({available:true,remaining_points:123})}
+            : responder(url,opts);}};
     vm.createContext(ctx);vm.runInContext(source,ctx);
     return {api:ctx.window.CanvasLinkfoxVideo,calls};
 }

@@ -23532,7 +23532,7 @@ async def run_canvas_video_task(task_id: str):
                 result = {
                     "videos": [local_url],
                     "task_id": upstream_task_id,
-                    "credits_consumed": task.get("credits_consumed"),
+                    "credits_consumed": queried.get("credits_consumed") if queried.get("credits_consumed") is not None else task.get("credits_consumed"),
                     "raw": queried.get("raw"),
                     "request": task.get("request") or {},
                 }
@@ -23937,6 +23937,33 @@ def linkfox_config_response() -> dict[str, Any]:
         "tool_gateway_env": "LINKFOX_TOOL_GATEWAY",
         "installed": skill_dir.is_dir(),
     }
+
+
+@app.get("/api/linkfox/balance")
+async def linkfox_balance():
+    """读取官方套餐周期积分；未知余额保持未知，不向前端返回 0。"""
+    key = linkfox_configured_key()
+    if not key:
+        return {"available": False, "remaining_points": None, "error": "请先配置 LinkFox API Key"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5, read=10, write=10, pool=5)) as client:
+            response = await client.post("https://ai-api.linkfox.com/v1/userPlan/info",
+                headers={"Authorization": f"Bearer {key}"}, json={})
+            response.raise_for_status()
+            body = response.json()
+        data = body.get("data") if isinstance(body, dict) and body.get("code") in (200, "200") else None
+        total = data.get("total") if isinstance(data, dict) else None
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if (isinstance(total, bool) or isinstance(usage, bool)
+                or not isinstance(total, (int, float)) or not isinstance(usage, (int, float))
+                or total < 0 or usage < 0):
+            raise ValueError("LinkFox 积分响应无效")
+        return {"available": True, "remaining_points": max(0, total - usage),
+                "total_points": total, "used_points": usage,
+                "expire_time": data.get("expireTime"), "error": ""}
+    except (httpx.HTTPError, ValueError, TypeError):
+        return {"available": False, "remaining_points": None,
+                "error": "LinkFox 积分读取失败，请检查 API Key、网络或套餐状态"}
 
 
 @app.get("/api/linkfox-config")

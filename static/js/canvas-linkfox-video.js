@@ -1,6 +1,33 @@
 (function(){
     const TYPE='linkfox-video';
     const activeTasks=new Map();
+    const balance={text:'积分查询中…',checkedAt:0,pending:null};
+    function balanceHtml(){ return `<button type="button" class="muted-note" data-linkfox-balance title="点击刷新 LinkFox 剩余积分">${esc(balance.text)}</button>`; }
+    function showBalance(text){
+        balance.text=text;
+        document.querySelectorAll('[data-linkfox-balance]').forEach(el=>{el.textContent=text;});
+    }
+    function refreshBalance(force=false){
+        if(typeof fetch!=='function') return Promise.resolve();
+        if(balance.pending) return balance.pending;
+        if(!force && Date.now()-balance.checkedAt<30000) return Promise.resolve();
+        showBalance('积分查询中…');
+        balance.pending=fetch('/api/linkfox/balance',{cache:'no-store'}).then(async response=>{
+            const data=await response.json();
+            if(!response.ok || !data.available || typeof data.remaining_points!=='number' || !Number.isFinite(data.remaining_points))
+                throw new Error(data.error || '积分暂不可用');
+            showBalance(`LinkFox 剩余积分：${data.remaining_points.toLocaleString('zh-CN')}`);
+        }).catch(()=>showBalance('LinkFox 积分暂不可用 · 点击重试')).finally(()=>{
+            balance.checkedAt=Date.now();balance.pending=null;
+        });
+        return balance.pending;
+    }
+    function bindBalance(root){
+        root.querySelectorAll('[data-linkfox-balance]').forEach(el=>el.addEventListener('click',event=>{
+            event.preventDefault();event.stopPropagation();refreshBalance(true);
+        }));
+        refreshBalance();
+    }
     function progressHtml(node){ return `<div class="muted-note" role="status" data-linkfox-task-status="${esc(node.id || '')}">${esc(node.linkfoxTaskStatus || '')}</div>`; }
     function reportTask(node,message,onChange){
         node.linkfoxTaskStatus=message;
@@ -64,6 +91,7 @@
             const existing=node.linkfoxTaskId;
             const taskId=existing || `canvas_video_linkfox_${Date.now()}_${Math.random().toString(16).slice(2)}`;
             node.linkfoxTaskId=taskId;
+            refreshBalance(true);
             await reportTask(node,existing?'正在恢复已保存的 LinkFox 任务':'正在准备并提交 LinkFox 任务',options.onChange);
             let task;
             try {
@@ -103,12 +131,13 @@
             throw new Error(`LinkFox 等待超时，已保留任务 ${taskId}，再次运行仅续查。`);
         })();
         activeTasks.set(node,work);
-        return work.finally(()=>activeTasks.delete(node));
+        return work.finally(()=>{activeTasks.delete(node);refreshBalance(true);});
     }
     const MODELS={
         reference:[
             {id:'seedance2.0',label:'Seedance 2.0',durations:[5,10,15],resolutions:['480p','720p','1080p'],ratios:['16:9','9:16','adaptive'],voice:'optional',maxImages:9},
             {id:'seedance2.0fast',label:'Seedance 2.0 Fast',durations:[5,10,15],resolutions:['480p','720p'],ratios:['16:9','9:16'],voice:'optional',maxImages:9},
+            {id:'seedance2.0mini',label:'Seedance 2.0 Mini',durations:[5,10,15],resolutions:['480p','720p'],ratios:['16:9','9:16'],voice:'optional',maxImages:9},
             {id:'可灵Omni',label:'可灵 Omni',durations:[5,10],resolutions:['720p','1080p'],ratios:['16:9','9:16','1:1'],voice:'fixed_false',maxImages:7},
             {id:'HappyHorse',label:'HappyHorse（百炼）',durations:[5,10,15],resolutions:['720p','1080p'],ratios:['16:9','9:16'],voice:'fixed_true',maxImages:9},
             {id:'海螺2.3',label:'海螺 2.3',durations:[6,10],resolutions:['768p','1080p'],ratios:[],voice:'fixed_false',maxImages:1},
@@ -117,6 +146,7 @@
         first_last_frame:[
             {id:'seedance2.0',label:'Seedance 2.0',durations:[5,10,15],resolutions:['480p','720p','1080p'],ratios:['16:9','9:16','adaptive'],voice:'optional',maxImages:2},
             {id:'seedance2.0fast',label:'Seedance 2.0 Fast',durations:[5,10,15],resolutions:['480p','720p'],ratios:['16:9','9:16'],voice:'optional',maxImages:2},
+            {id:'seedance2.0mini',label:'Seedance 2.0 Mini',durations:[5,10,15],resolutions:['480p','720p'],ratios:['16:9','9:16'],voice:'optional',maxImages:2},
             {id:'可灵2.6',label:'可灵 2.6',durations:[5,10],resolutions:['720p','1080p'],ratios:['adaptive'],voice:'optional',maxImages:2},
         ]
     };
@@ -141,6 +171,7 @@
         if(!model.resolutions.includes(node.resolution)) node.resolution=model.resolutions[0]||'';
         if(!model.ratios.includes(node.aspectRatio)) node.aspectRatio=model.ratios[0]||'';
         if(model.voice!=='optional') node.voice=model.voice==='fixed_true';
+        if(model.id==='seedance2.0mini'){node.isPro=false;node.camera='single';}
     }
     function createNode(point, extra={}){
         const mode=extra.mode || 'reference';
@@ -157,7 +188,7 @@
         const durations=selectedModel.durations; const resolutions=selectedModel.resolutions.length?selectedModel.resolutions:['']; const ratios=selectedModel.ratios.length?selectedModel.ratios:[''];
         const voiceFixed=selectedModel.voice!=='optional';
         return `<div class="linkfox-video-body">${progressHtml(node)}
-            <div class="linkfox-video-badge">LinkFox · 图转视频</div>
+            <div class="linkfox-video-badge">LinkFox · 图转视频</div>${balanceHtml()}
             <label class="field"><div class="setting-title">生成模式</div><select class="select-lite" data-linkfox-field="mode"><option value="reference" ${mode==='reference'?'selected':''}>参考图</option><option value="first_last_frame" ${mode==='first_last_frame'?'selected':''}>首尾帧</option></select></label>
             <label class="field"><div class="setting-title">视频模型</div><select class="select-lite" data-linkfox-field="model">${models.map(item=>`<option value="${esc(item.id)}" ${item.id===node.model?'selected':''}>${esc(item.label)}</option>`).join('')}</select></label>
             <div class="linkfox-video-grid">
@@ -168,8 +199,8 @@
             <label class="field"><div class="setting-title">动态效果提示词</div><textarea class="setting-textarea linkfox-video-prompt" data-linkfox-field="prompt" rows="3" placeholder="描述图片如何运动">${esc(node.prompt||'')}</textarea></label>
             <div class="linkfox-video-grid linkfox-video-toggles">
                 <button type="button" class="setting-check ${node.voice?'active':''}" data-linkfox-toggle="voice" ${voiceFixed?'disabled':''}><span class="check-dot"></span>声音${voiceFixed?'（模型固定）':''}</button>
-                <button type="button" class="setting-check ${node.isPro?'active':''}" data-linkfox-toggle="isPro"><span class="check-dot"></span>Pro 模式</button>
-                <button type="button" class="setting-check ${node.camera==='multi'?'active':''}" data-linkfox-toggle="camera"><span class="check-dot"></span>多段运镜</button>
+                <button type="button" class="setting-check ${node.isPro?'active':''}" data-linkfox-toggle="isPro" ${node.model==='seedance2.0mini'?'disabled':''}><span class="check-dot"></span>Pro 模式</button>
+                <button type="button" class="setting-check ${node.camera==='multi'?'active':''}" data-linkfox-toggle="camera" ${node.model==='seedance2.0mini'?'disabled':''}><span class="check-dot"></span>多段运镜</button>
             </div>
             ${mode==='first_last_frame'?'<div class="linkfox-frame-note">首帧和尾帧请通过两个输入端口连接；可灵 2.6 尾帧仅支持 1080p 且关闭声音。</div>':'<div class="linkfox-frame-note">参考图模式支持多张图片，数量上限随模型变化。</div>'}
             <div class="linkfox-config-hint">未配置 API Key 时，请打开“API 设置”中的 LinkFox 视频生成配置。</div>
@@ -198,6 +229,7 @@
         return payload;
     }
     function bind(root,node,options={}){
+        bindBalance(root);
         const rerender=()=>{ options.onChange?.(node,{render:true}); };
         root.querySelectorAll('[data-linkfox-field]').forEach(control=>{
             control.addEventListener('mousedown',e=>e.stopPropagation()); control.addEventListener('click',e=>e.stopPropagation());
@@ -228,12 +260,13 @@
         const field=(key,label,values,value)=>`<label class="field"><div class="setting-title">${label}</div><select class="select-lite" data-linkfox-unified="${key}">${values.map(item=>`<option value="${esc(item)}" ${String(item)===String(value)?'selected':''}>${esc(labels[item] || item || '按模型')}</option>`).join('')}</select></label>`;
         const modes=MODELS.first_last_frame.some(m=>m.id===node.model)?['reference','first_last_frame']:['reference'];
         if(node.model==='可灵2.6') modes.splice(0,1);
-        return `<div class="linkfox-unified-settings">${progressHtml(node)}<div class="gen-settings-row">${field('linkfoxMode','模式',modes,view.mode)}${field('duration','秒',spec.durations,node.duration)}</div>
+        return `<div class="linkfox-unified-settings">${progressHtml(node)}${balanceHtml()}<div class="gen-settings-row">${field('linkfoxMode','模式',modes,view.mode)}${field('duration','秒',spec.durations,node.duration)}</div>
             <div class="gen-settings-row">${field('resolution','分辨率',spec.resolutions.length?spec.resolutions:[''],node.resolution)}${field('aspectRatio','画幅',spec.ratios.length?spec.ratios:[''],node.aspectRatio)}</div>
             <div class="gen-settings-row"><label class="field linkfox-audio-toggle"><input type="checkbox" data-linkfox-unified="generateAudio" ${node.generateAudio?'checked':''} ${spec.voice!=='optional' || (node.model==='可灵2.6' && node.resolution==='720p')?'disabled':''}>声音${spec.voice!=='optional'?'（模型固定）':''}</label>${field('linkfoxCamera','镜头', ['single','multi'],node.linkfoxCamera || 'single')}</div>
             <div class="muted-note">LinkFox · ${view.mode==='first_last_frame'?'首帧＋可选尾帧':`最多 ${spec.maxImages} 张参考图`}。源视频会先解析动作与镜头；无图片时提取起始画面。${node.model==='可灵2.6'?'尾帧要求1080p并关闭声音。':''}</div></div>`;
     }
     function bindUnified(root,node,onChange){
+        bindBalance(root);
         root.querySelectorAll('[data-linkfox-unified]').forEach(control=>{
             control.addEventListener('mousedown',event=>event.stopPropagation());
             control.addEventListener('change',event=>{

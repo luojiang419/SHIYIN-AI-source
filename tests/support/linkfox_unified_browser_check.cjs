@@ -10,6 +10,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     const captured=[],errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     const tasks=new Map();
+    await page.route('**/api/linkfox/balance',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({available:true,remaining_points:1420480})}));
     await page.route('**/api/canvas-video-tasks',async route=>{
         const payload=route.request().postDataJSON();captured.push(payload);
         tasks.set(payload.task_id,{status:'succeeded',upstream_task_id:'linkfox-browser-task',result:{videos:['/fixture.mp4'],request:{...payload,prompt:`${payload.model}已解析的实际提示词`,original_prompt:payload.prompt,prompt_adaptation:{status:'adapted'}}}});
@@ -30,18 +31,25 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
         await film.locator('[data-film-field="model"]').selectOption('HappyHorse');
         assert(await film.locator('[data-linkfox-unified="generateAudio"]').isChecked());
         assert(await film.locator('[data-linkfox-unified="generateAudio"]').isDisabled());
-        assert.equal(await film.locator('[data-film-field="model"] option').count(),7);
+        assert.equal(await film.locator('[data-film-field="model"] option').count(),8);
+        await page.waitForFunction(()=>[...document.querySelectorAll('[data-linkfox-balance]')].filter(el=>el.textContent.includes('1,420,480')).length>=2);
         await page.screenshot({path:path.join(output,'two-nodes.png'),fullPage:true});
         await classic.locator('.gen-btn').click();
         await page.waitForFunction(()=>document.querySelector('[data-linkfox-task-status="video"]').textContent.includes('linkfox-browser-task'));
         await page.waitForFunction(()=>nodes.find(node=>node.id==='video').runStatus==='done');
+        const firstDelivery=await page.evaluate(()=>nodes.find(node=>node.id==='video').linkfoxDeliveredTaskId);
         await classic.locator('.video-model').selectOption('seedance2.0fast');
         await classic.locator('.gen-btn').click();
-        await page.waitForFunction(()=>nodes.find(node=>node.id==='video').runStatus==='done');
+        await page.waitForFunction(previous=>nodes.find(node=>node.id==='video').linkfoxDeliveredTaskId!==previous,firstDelivery);
+        const secondDelivery=await page.evaluate(()=>nodes.find(node=>node.id==='video').linkfoxDeliveredTaskId);
+        await classic.locator('.video-model').selectOption('seedance2.0mini');
+        assert.deepEqual(await classic.locator('[data-linkfox-unified="resolution"] option').allTextContents(),['480p','720p']);
+        await classic.locator('.gen-btn').click();
+        await page.waitForFunction(previous=>nodes.find(node=>node.id==='video').linkfoxDeliveredTaskId!==previous,secondDelivery);
         // 模态错误框可由正常页面关闭；不让其遮住下一节点。
         await page.keyboard.press('Escape');
         await page.evaluate(()=>runFilmNode('film'));
-        assert.equal(captured.length,3);
+        assert.equal(captured.length,4);
         assert(captured.every(item=>item.provider_id==='linkfox' && item.auto_adapt_prompt));
         assert.equal(captured[0].model,'海螺2.3');
         assert.equal(captured[0].duration,6);
@@ -49,8 +57,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
         assert.equal(captured[1].prompt,'海螺2.3已解析的实际提示词');
         assert.equal(captured[1].prompt_source_model,'海螺2.3');
         assert.equal(captured[1].auto_parse_media,false);
-        assert.equal(captured[2].model,'HappyHorse');
-        assert.equal(captured[2].generate_audio,true);
+        assert.equal(captured[2].model,'seedance2.0mini');
+        assert.equal(captured[3].model,'HappyHorse');
+        assert.equal(captured[3].generate_audio,true);
         assert(captured.every(item=>item.images.length===1));
         assert.equal(await page.evaluate(()=>nodes.find(node=>node.id==='video').prompt),'女子向左走，无配乐。');
         assert.deepEqual(errors,[]);

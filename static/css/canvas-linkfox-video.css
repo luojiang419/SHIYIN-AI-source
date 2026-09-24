@@ -23,6 +23,19 @@
     text-transform:uppercase;
 }
 
+[data-linkfox-balance] {
+    display:block;
+    width:100%;
+    padding:3px 0;
+    border:0;
+    background:transparent;
+    color:var(--muted);
+    font:inherit;
+    font-size:11px;
+    text-align:left;
+    cursor:pointer;
+}
+
 .linkfox-video-grid {
     display:grid;
     grid-template-columns:repeat(3,minmax(0,1fr));

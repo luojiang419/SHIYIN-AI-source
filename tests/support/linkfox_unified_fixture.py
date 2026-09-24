@@ -4,7 +4,7 @@ from http.server import ThreadingHTTPServer
 
 import canvas_startup_fixture as fixture
 
-MODELS = ['seedance2.0', 'seedance2.0fast', '可灵Omni', 'HappyHorse', '海螺2.3', 'wan2.6', '可灵2.6']
+MODELS = ['seedance2.0', 'seedance2.0fast', 'seedance2.0mini', '可灵Omni', 'HappyHorse', '海螺2.3', 'wan2.6', '可灵2.6']
 fixture.CONFIG['api_providers'].append({'id': 'linkfox', 'name': 'LinkFox', 'enabled': True,
                                       'video_models': MODELS, 'image_models': [], 'chat_models': []})
 

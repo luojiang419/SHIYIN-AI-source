@@ -10,6 +10,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     const captured=[],errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     const tasks=new Map();
+    await page.route('**/api/linkfox-config',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({configured:true,tool_gateway:'https://tool-gateway.linkfox.com'})}));
     await page.route('**/api/linkfox/balance',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({available:true,remaining_points:1420480})}));
     await page.route('**/api/canvas-video-tasks',async route=>{
         const payload=route.request().postDataJSON();captured.push(payload);

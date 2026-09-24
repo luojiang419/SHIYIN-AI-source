@@ -730,6 +730,7 @@
                 if(key==='apiProvider'){
                     const getDefault=['film-storyboard',LINE_ART_TYPE].includes(node.type) ? options.defaultImageModel : options.defaultModel;
                     node.model=getDefault?.(control.value,node) || '';
+                    if(node.type==='film-video' && node.apiProvider==='linkfox') void window.CanvasLinkfoxVideo?.ensureKeySetup?.();
                 }
                 const nextRule = modelRule(node.apiProvider, node.model);
                 if(node.type === 'film-video' && nextRule.id === 'minimax'){

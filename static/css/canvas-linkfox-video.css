@@ -189,3 +189,16 @@
 .linkfox-unified-settings .field.linkfox-audio-toggle { flex-direction:row; align-items:center; align-self:center; }
 .linkfox-unified-settings .field input[type="checkbox"] { width:14px; height:14px; padding:0; margin:0; flex:none; }
 .linkfox-unified-settings .muted-note { font-size:11px; line-height:1.5; }
+.linkfox-key-setup{position:fixed;inset:0;z-index:100010;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(8,10,14,.58);backdrop-filter:blur(8px)}
+.linkfox-key-setup-dialog{width:min(440px,100%);box-sizing:border-box;padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--card-solid);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}
+.linkfox-key-setup-dialog h2{margin:0;font-size:18px;font-weight:800}
+.linkfox-key-setup-dialog p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.linkfox-key-setup-dialog label{font-size:12px;font-weight:700}
+.linkfox-key-setup-dialog input{box-sizing:border-box;width:100%;min-height:38px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--text);outline:none}
+.linkfox-key-setup-dialog input:focus{border-color:var(--strong)}
+.linkfox-setup-log{min-height:28px;max-height:90px;overflow-y:auto;scroll-behavior:smooth;font-size:12px;line-height:1.7;color:var(--muted)}
+.linkfox-setup-line.ok{color:#299269}.linkfox-setup-line.error{color:#d15d57}
+.linkfox-setup-actions{display:flex;justify-content:flex-end;gap:8px}
+.linkfox-setup-actions button{min-height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--text);font-size:12px;cursor:pointer}
+.linkfox-setup-actions button.primary{border-color:var(--strong);background:var(--strong);color:var(--strong-text)}
+.linkfox-setup-actions button:disabled{opacity:.55;cursor:wait}

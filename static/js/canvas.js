@@ -4587,7 +4587,9 @@ function addLinkfoxVideoNode(point){
         const view=api.normalizeUnified({...node,...defaults,generateAudio:defaults.generateAudio ?? node.voice});
         Object.assign(node,defaults,{model:view.model,mode:view.mode,duration:view.duration,resolution:view.resolution,aspectRatio:view.aspectRatio,voice:view.voice});
     }
-    return addNode(node);
+    const created=addNode(node);
+    void api.ensureKeySetup?.();
+    return created;
 }
 function addFilmNode(type, point){
     const api = window.CanvasFilmNodes;
@@ -15379,6 +15381,7 @@ function renderVideoBody(node){
         applyPersonalGenerationDefaults(node, 'video');
         render();
         scheduleSave();
+        if(node.apiProvider === 'linkfox') void window.CanvasLinkfoxVideo?.ensureKeySetup?.();
         if(isYouyunH3VideoNode(node)) void loadYouyunH3Status({renderAfter:true});
     };
     modelSelect.onchange = e => {

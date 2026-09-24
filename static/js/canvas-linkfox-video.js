@@ -2,6 +2,83 @@
     const TYPE='linkfox-video';
     const activeTasks=new Map();
     const balance={text:'积分查询中…',checkedAt:0,pending:null};
+    const keySetup={checked:false,pending:null,dismissed:false,modal:null};
+    function setupStatus(modal,message,kind='info'){
+        const log=modal.querySelector('[data-linkfox-setup-log]');
+        const line=document.createElement('div');
+        line.className=`linkfox-setup-line ${kind}`;
+        line.textContent=message;
+        log.appendChild(line);
+        log.scrollTop=log.scrollHeight;
+    }
+    function showKeySetup(config){
+        if(keySetup.modal) return;
+        const modal=document.createElement('div');
+        modal.className='linkfox-key-setup';
+        modal.innerHTML=`<div class="linkfox-key-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="linkfoxKeySetupTitle">
+            <h2 id="linkfoxKeySetupTitle">配置 LinkFox 密钥</h2>
+            <p>首次使用 LinkFox 视频生成，请输入 Agent API Key。密钥保存在本机安全存储。</p>
+            <label for="linkfoxSetupKey">LinkFox Agent API Key</label>
+            <input id="linkfoxSetupKey" type="password" maxlength="8096" autocomplete="off" spellcheck="false" placeholder="输入 API Key">
+            <div class="linkfox-setup-log" data-linkfox-setup-log role="status" aria-live="polite"></div>
+            <div class="linkfox-setup-actions"><button type="button" data-linkfox-setup-cancel>取消</button><button type="button" class="primary" data-linkfox-setup-confirm>确定并查询积分</button></div>
+        </div>`;
+        document.body.appendChild(modal);
+        keySetup.modal=modal;
+        const input=modal.querySelector('#linkfoxSetupKey');
+        const confirm=modal.querySelector('[data-linkfox-setup-confirm]');
+        const cancel=modal.querySelector('[data-linkfox-setup-cancel]');
+        const close=()=>{keySetup.dismissed=true;keySetup.modal=null;modal.remove();};
+        cancel.onclick=close;
+        input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();confirm.click();}});
+        confirm.onclick=async()=>{
+            if(confirm.dataset.complete==='true'){close();return;}
+            const apiKey=input.value.trim();
+            if(!apiKey){setupStatus(modal,'请输入 LinkFox API Key。','error');input.focus();return;}
+            confirm.disabled=true;cancel.disabled=true;input.disabled=true;
+            const started=Date.now();
+            setupStatus(modal,'正在保存密钥到本机安全存储…');
+            let ticker=null;
+            try{
+                const savedResponse=await fetch('/api/linkfox-config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:apiKey,tool_gateway:config.tool_gateway || 'https://tool-gateway.linkfox.com'})});
+                const saved=await savedResponse.json();
+                if(!savedResponse.ok || !saved.configured) throw new Error(saved.detail || '保存密钥失败');
+                setupStatus(modal,'密钥已保存，正在查询 LinkFox 积分…','ok');
+                ticker=setInterval(()=>setupStatus(modal,`仍在查询积分 · 已等待 ${Math.max(1,Math.round((Date.now()-started)/1000))} 秒…`),3000);
+                const response=await fetch('/api/linkfox/balance',{cache:'no-store'});
+                const data=await response.json();
+                if(!response.ok || !data.available || typeof data.remaining_points!=='number' || !Number.isFinite(data.remaining_points)) throw new Error(data.error || '积分查询失败');
+                const points=data.remaining_points.toLocaleString('zh-CN');
+                showBalance(`LinkFox 剩余积分：${points}`);
+                balance.checkedAt=Date.now();
+                keySetup.checked=true;
+                setupStatus(modal,`查询成功，剩余积分：${points}`,'ok');
+                confirm.dataset.complete='true';
+                confirm.textContent='确定，进入画布';
+                input.value='';
+            }catch(error){
+                setupStatus(modal,error.message || '配置失败，请重试。','error');
+                confirm.textContent='重试保存并查询';
+            }finally{
+                if(ticker) clearInterval(ticker);
+                confirm.disabled=false;cancel.disabled=false;input.disabled=false;
+                if(confirm.dataset.complete==='true') confirm.focus();else input.focus();
+            }
+        };
+        input.focus();
+    }
+    function checkKeySetup(force=false){
+        if(keySetup.pending) return keySetup.pending;
+        if(keySetup.modal || (!force && (keySetup.checked || keySetup.dismissed))) return Promise.resolve();
+        keySetup.pending=fetch('/api/linkfox-config',{cache:'no-store'}).then(async response=>{
+            const data=await response.json();
+            if(!response.ok) throw new Error(data.detail || '读取 LinkFox 配置失败');
+            if(!data.configured || (force && !keySetup.checked)) showKeySetup(data);
+            else {keySetup.checked=true;refreshBalance();}
+        }).catch(error=>showBalance(error.message || 'LinkFox 配置读取失败 · 点击重试'))
+          .finally(()=>{keySetup.pending=null;});
+        return keySetup.pending;
+    }
     function balanceHtml(){ return `<button type="button" class="muted-note" data-linkfox-balance title="点击刷新 LinkFox 剩余积分">${esc(balance.text)}</button>`; }
     function showBalance(text){
         balance.text=text;
@@ -24,9 +101,10 @@
     }
     function bindBalance(root){
         root.querySelectorAll('[data-linkfox-balance]').forEach(el=>el.addEventListener('click',event=>{
-            event.preventDefault();event.stopPropagation();refreshBalance(true);
+            event.preventDefault();event.stopPropagation();
+            if(!keySetup.checked) checkKeySetup(true);else refreshBalance(true);
         }));
-        refreshBalance();
+        checkKeySetup();
     }
     function progressHtml(node){ return `<div class="muted-note" role="status" data-linkfox-task-status="${esc(node.id || '')}">${esc(node.linkfoxTaskStatus || '')}</div>`; }
     function reportTask(node,message,onChange){
@@ -276,5 +354,5 @@
             });
         });
     }
-    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified,generate,taskPayload,rememberVideoPromptResult};
+    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified,ensureKeySetup:()=>checkKeySetup(true),generate,taskPayload,rememberVideoPromptResult};
 })();

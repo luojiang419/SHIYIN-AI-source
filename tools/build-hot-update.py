@@ -58,6 +58,23 @@ def run(command):
     subprocess.run(command, cwd=ROOT, check=True)
 
 
+def backend_supports_current_topaz_models(executable):
+    """Reject cached sidecars that still search only the legacy Topaz Video AI path."""
+    if not executable.is_file():
+        return False
+    try:
+        from PyInstaller.archive.readers import CArchiveReader
+        archive = CArchiveReader(str(executable)).open_embedded_archive('PYZ.pyz')
+        module = archive.extract('canvas_core.topaz_video')
+        candidate = next(
+            item for item in module.co_consts
+            if hasattr(item, 'co_name') and item.co_name == 'candidate_topaz_model_dirs'
+        )
+        return 'TOPAZ_CURRENT_PRODUCT_DIR' in candidate.co_names
+    except (OSError, AttributeError, KeyError, StopIteration, ValueError):
+        return False
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--version', default=time.strftime('%Y%m%d%H%M%S'))
@@ -89,10 +106,14 @@ def main():
     if not args.web_only:
         if state.get('desktop')!=desktop_hash or not desktop.exists():
             run(['cargo','build','--release','--manifest-path','src-tauri/Cargo.toml']);state['desktop']=desktop_hash
-        if not args.bootstrap and not args.updater_only and (state.get('backend')!=backend_hash or not (backend/'canvas-backend.exe').exists()):
+        if not args.bootstrap and not args.updater_only and (
+            state.get('backend')!=backend_hash or not backend_supports_current_topaz_models(backend/'canvas-backend.exe')
+        ):
             # PyInstaller可能把语法错误的main当成不可导入模块而继续产出EXE。
             run([sys.executable,'-m','compileall','-q','main.py','backend_entry.py','canvas_core'])
             run([sys.executable,'-m','PyInstaller','--noconfirm','--distpath','dist/hot-backend','--workpath','.build/hot-backend','canvas-backend.spec']);state['backend']=backend_hash
+            if not backend_supports_current_topaz_models(backend/'canvas-backend.exe'):
+                raise RuntimeError('热更新后端仍缺少 Topaz Video 新版模型目录检测，请清理 PyInstaller 缓存后重建')
     snapshot=ROOT/'dist/hot-update'/args.version
     snapshot.mkdir(parents=True,exist_ok=False)
     files=snapshot/'files'

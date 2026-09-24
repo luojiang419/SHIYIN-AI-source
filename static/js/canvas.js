@@ -1666,7 +1666,7 @@ async function loadYouyunH3Status({renderAfter=false}={}){
                     error:String(data.error || '')
                 };
             } catch(error) {
-                youyunH3State = {...youyunH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 优云智算H3 状态失败'};
+                youyunH3State = {...youyunH3State, loaded:true, loading:false, generationEnabled:false, resolutions:[], defaults:{}, error:error.message || '读取 优云智算H3 状态失败'};
             }
             return youyunH3State;
         })().finally(() => { youyunH3StatusTask = null; });
@@ -1678,6 +1678,7 @@ async function loadYouyunH3Status({renderAfter=false}={}){
 function youyunH3ConnectionNote(){
     if(youyunH3State.loading) return '正在检查 优云智算H3 服务…';
     const points = youyunH3State.defaults?.available_points;
+    if(youyunH3State.error && points !== 0) return youyunH3State.error;
     if(typeof points === 'number' && Number.isFinite(points) && points >= 0)
         return `优云智算H3 · 可用积分 ${points.toLocaleString('zh-CN')}${youyunH3State.generationEnabled ? ' · 已就绪' : ''}`;
     return youyunH3State.error || '优云智算H3 不可用，请检查 API 设置。';

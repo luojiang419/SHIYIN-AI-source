@@ -71,6 +71,16 @@ async function run(){
     assert.match(text,/768P/);assert.match(text,/4K/);assert.match(text,/移除音轨/);assert.doesNotMatch(text,/采样步数|0\.2MP/);
     assert.match(text,/优云智算H3.*可用积分 1,150/);
   }
+  await page.evaluate(()=>{
+    youyunH3State.defaults.available_points=960;
+    smartYouyunH3State.defaults.available_points=960;
+    drawClassic(); drawFilm(); drawSmart();
+  });
+  for(const panel of ['classic','film','smart']){
+    const text=await page.locator('#'+panel).textContent();
+    assert.match(text,/优云智算H3.*可用积分 960/);
+    assert.doesNotMatch(text,/1,150/);
+  }
   await page.selectOption('#film [data-film-field="resolution"]','2K');
   assert.equal(await page.locator('#film [data-film-field="resolution"]').inputValue(),'2K');
   await page.locator('#film [data-film-toggle="muteAudio"]').click();
@@ -87,7 +97,19 @@ async function run(){
     const text=await page.locator('#'+panel).textContent();assert.match(text,/采样步数/);assert.match(text,/0\.2MP/);assert.doesNotMatch(text,/移除音轨|可用积分/);
   }
   assert.match(classic,/film-video-balance-note/);
-  assert.equal(await page.evaluate(()=>youyunH3ConnectionNote.call(null)), '优云智算H3 · 可用积分 1,150 · 已就绪');
+  assert.equal(await page.evaluate(()=>youyunH3ConnectionNote.call(null)), '优云智算H3 · 可用积分 960 · 已就绪');
+  const failedRefreshNotes=await page.evaluate(()=>{
+    youyunH3State={loaded:true,loading:false,generationEnabled:false,defaults:{available_points:1150},error:'积分读取失败'};
+    smartYouyunH3State={loaded:true,loading:false,generationEnabled:false,defaults:{available_points:1150},error:'积分读取失败'};
+    return [youyunH3ConnectionNote(),smartYouyunH3ConnectionNote()];
+  });
+  assert.deepEqual(failedRefreshNotes,['积分读取失败','积分读取失败']);
+  const zeroPointNotes=await page.evaluate(()=>{
+    youyunH3State={loaded:true,loading:false,generationEnabled:false,defaults:{available_points:0},error:'优云智算H3 可用积分为 0'};
+    smartYouyunH3State={loaded:true,loading:false,generationEnabled:false,defaults:{available_points:0},error:'优云智算H3 可用积分为 0'};
+    return [youyunH3ConnectionNote(),smartYouyunH3ConnectionNote()];
+  });
+  zeroPointNotes.forEach(note=>assert.match(note,/可用积分 0/));
   assert.equal(await page.locator('#film [data-film-field="steps"]').inputValue(),'2');
   for(const selector of ['#classic .video-duration','#film [data-film-field="duration"]','#smart [data-param="videoDuration"]']){
     assert.equal(await page.locator(selector).getAttribute('min'),'1');assert.equal(await page.locator(selector).getAttribute('max'),'15');

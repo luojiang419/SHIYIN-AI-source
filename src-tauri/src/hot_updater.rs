@@ -167,10 +167,7 @@ pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Ma
         if let Ok(raw) = raw {
             if !serde_json::from_str::<serde_json::Value>(&raw).ok().is_some_and(|v| v.get("release").is_some_and(|r| r.is_null())) {
                 let m = verify(&raw)?;
-                if version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) {
-                    return Err(format!("热更新要求桌面基线 {}，请联系管理员迁移更新器。", m.min_desktop_version));
-                }
-                if m.version > applied {
+                if !version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) && m.version > applied {
                     if base != settings.lan_update_url {
                         let mut updated = settings.clone(); updated.lan_update_url = base.clone(); save_settings_file(data, &updated)?;
                     }
@@ -184,9 +181,8 @@ pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Ma
         Err(_) => return Ok(None),
     };
     let m = verify(&raw)?;
-    if version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) {
-        return Err(format!("热更新要求桌面基线 {}，请安装新的基准版本。", m.min_desktop_version));
-    }
+    // 不兼容的热更新应让全量更新继续检查，不能阻断旧客户端升级。
+    if version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) { return Ok(None); }
     if m.version <= applied { return Ok(None); }
     Ok(Some((m, raw, MODELSCOPE_SOURCE.into())))
 }

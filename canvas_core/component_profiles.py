@@ -18,6 +18,8 @@ class RuntimeCapabilities:
     gpu_memory_bytes: int = 0
     compute_capability: float = 0.0
     driver_version: str = ""
+    gpu_uuid: str = ""
+    gpu_index: int = -1
 
     def public_dict(self) -> dict[str, object]:
         return {
@@ -28,6 +30,8 @@ class RuntimeCapabilities:
             "gpu_memory_bytes": self.gpu_memory_bytes,
             "compute_capability": self.compute_capability,
             "driver_version": self.driver_version,
+            "gpu_uuid": self.gpu_uuid,
+            "gpu_index": self.gpu_index,
         }
 
 
@@ -41,22 +45,28 @@ def _normalized_arch(value: str) -> str:
 
 
 def probe_runtime_capabilities() -> RuntimeCapabilities:
+    return probe_runtime_devices()[0]
+
+
+def probe_runtime_devices() -> list[RuntimeCapabilities]:
     system = platform.system().strip().lower()
     capabilities = RuntimeCapabilities(system, _normalized_arch(platform.machine()), "cpu")
     if system != "windows":
-        return capabilities
+        return [capabilities]
     executable = shutil.which("nvidia-smi")
     if not executable:
         system_root = os.environ.get("SystemRoot", r"C:\Windows")
-        candidate = os.path.join(system_root, "System32", "nvidia-smi.exe")
-        executable = candidate if os.path.isfile(candidate) else None
+        candidates = [os.path.join(system_root, 'System32', 'nvidia-smi.exe'),
+                      os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'),
+                                   'NVIDIA Corporation', 'NVSMI', 'nvidia-smi.exe')]
+        executable = next((candidate for candidate in candidates if os.path.isfile(candidate)), None)
     if not executable:
-        return capabilities
+        return [capabilities]
     try:
         result = subprocess.run(
             [
                 executable,
-                "--query-gpu=name,memory.total,compute_cap,driver_version",
+                "--query-gpu=name,memory.total,compute_cap,driver_version,uuid,index",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
@@ -65,25 +75,34 @@ def probe_runtime_capabilities() -> RuntimeCapabilities:
             errors="replace",
             timeout=5,
             check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
-        row = next((line.strip() for line in result.stdout.splitlines() if line.strip()), "")
-        fields = [part.strip() for part in row.split(",")]
-        if result.returncode != 0 or len(fields) < 4:
-            return capabilities
-        memory_mib = int(float(fields[1]))
-        compute = float(fields[2]) if re.fullmatch(r"\d+(?:\.\d+)?", fields[2]) else 0.0
-        return RuntimeCapabilities(
-            system,
-            capabilities.arch,
-            "cuda",
-            gpu_name=fields[0],
-            gpu_memory_bytes=memory_mib * 1024 * 1024,
-            compute_capability=compute,
-            driver_version=fields[3],
-        )
+        if result.returncode != 0:
+            return [capabilities]
+        devices = []
+        visible = os.getenv('CUDA_VISIBLE_DEVICES')
+        allowed = {part.strip() for part in visible.split(',')} if visible is not None else None
+        for row in result.stdout.splitlines():
+            fields = [part.strip() for part in row.split(',')]
+            if len(fields) < 6:
+                continue
+            try:
+                memory_mib = int(float(fields[1]))
+                compute = float(fields[2]) if re.fullmatch(r'\d+(?:\.\d+)?', fields[2]) else 0.0
+                index = int(fields[5])
+            except ValueError:
+                continue
+            if allowed is not None and str(index) not in allowed and fields[4] not in allowed:
+                continue
+            devices.append(RuntimeCapabilities(
+                system, capabilities.arch, 'cuda', gpu_name=fields[0],
+                gpu_memory_bytes=memory_mib * 1024 * 1024,
+                compute_capability=compute, driver_version=fields[3],
+                gpu_uuid=fields[4], gpu_index=index,
+            ))
+        return devices or [capabilities]
     except (OSError, ValueError, subprocess.SubprocessError):
-        return capabilities
+        return [capabilities]
 
 
 def compatible_variants(

@@ -11,6 +11,7 @@ from .secrets import SecretStore
 from .dwpose_models import DWPoseModelManager
 from .depth_models import DepthModelManager
 from .person_depth_components import PersonDepthComponentManager
+from .video_depth_runtime import probe_video_depth_capabilities
 
 
 ADMIN_DATA_LAYOUT = DataLayout.from_app_paths(APP_PATHS)
@@ -52,9 +53,10 @@ VIDEO_DEPTH_RUNTIME_MANAGER = PersonDepthComponentManager(
     component_name="video-depth-runtime",
     display_name="深度视频运行时",
     lan_path="video-depth-runtime",
+    capability_provider=probe_video_depth_capabilities,
     smoke_runner=lambda command, root: __import__(
         "canvas_core.video_depth", fromlist=["smoke_video_depth_runtime"]
-    ).smoke_video_depth_runtime(command, root),
+    ).smoke_video_depth_runtime(command, root, VIDEO_DEPTH_RUNTIME_MANAGER.capabilities),
 )
 ACCOUNT_STORAGE = AccountStorageRegistry(ACCOUNT_STORE, ADMIN_DATA_LAYOUT, ADMIN_DATABASE)
 DATA_LAYOUT = ScopedDataLayoutProxy(ACCOUNT_STORAGE)

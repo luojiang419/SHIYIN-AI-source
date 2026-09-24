@@ -43,11 +43,15 @@ class VideoDepthUnavailable(RuntimeError):
     pass
 
 
-def smoke_video_depth_runtime(command: list[str], component_root: Path) -> None:
+def smoke_video_depth_runtime(command: list[str], component_root: Path, capabilities=None) -> None:
     env = os.environ.copy()
     runtime_root = component_root / "runtime"
     env["SHIYIN_VIDEO_DEPTH_SOURCE_ROOT"] = str(runtime_root / "sources")
     env["PATH"] = str(runtime_root / "bin") + os.pathsep + env.get("PATH", "")
+    from canvas_core.video_depth_runtime import configure_video_depth_device
+    marker = component_root / 'component-manifest.json'
+    variant = str(json.loads(marker.read_text(encoding='utf-8')).get('variant') or '') if marker.is_file() else ''
+    configure_video_depth_device(env, variant, capabilities)
     result = subprocess.run(
         [*command, "status"], cwd=component_root, env=env, capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=60,
@@ -65,6 +69,8 @@ def smoke_video_depth_runtime(command: list[str], component_root: Path) -> None:
     status = next((item.get("result") for item in events if item.get("type") == "result"), None)
     if not isinstance(status, dict) or not status.get("runtimeReady", True):
         raise VideoDepthUnavailable("深度视频运行时自检未通过")
+    if 'cuda' in variant and not status.get('cudaAvailable'):
+        raise VideoDepthUnavailable('深度视频 CUDA 运行时无法使用当前显卡，将自动尝试兼容运行时')
 
 
 class VideoDepthTaskService:
@@ -136,6 +142,9 @@ class VideoDepthTaskService:
 
     def _packaged_runtime(self) -> dict[str, Any] | None:
         managed = self.runtime_manager.installation_path() if self.runtime_manager else None
+        if self.runtime_manager and managed is None:
+            # Do not bypass hardware selection with a stale bundled CUDA runtime.
+            return None
         runtime_root = managed / "runtime" if managed else self.packaged_runtime
         worker = runtime_root / "video-depth-worker" / "video-depth-worker.exe"
         sources = runtime_root / "sources"
@@ -145,6 +154,10 @@ class VideoDepthTaskService:
         installation = self.model_manager.installation_path() if self.model_manager else None
         model_root = installation / "models" if installation else None
         env = os.environ.copy()
+        if self.runtime_manager:
+            from canvas_core.video_depth_runtime import configure_video_depth_device
+            configure_video_depth_device(env, getattr(self.runtime_manager, 'selected_variant_id', ''),
+                                         getattr(self.runtime_manager, 'capabilities', None))
         env["SHIYIN_VIDEO_DEPTH_SOURCE_ROOT"] = str(sources)
         if model_root:
             env["SHIYIN_VIDEO_DEPTH_MODEL_ROOT"] = str(model_root)
@@ -175,6 +188,7 @@ class VideoDepthTaskService:
             ),
             "progress": runtime_status.get("progress", model_status.get("progress", 1 if ready else 0)),
             "runtimeVariant": runtime_status.get("selected_variant", "bundled" if runtime else ""),
+            "runtimeCapabilities": runtime_status.get('capabilities', {}),
             "model": self._model_key(),
             "label": self._model_label(),
             "modelTier": "quality" if self._model_key() == "vda_base_fp16_relative" else "lite",

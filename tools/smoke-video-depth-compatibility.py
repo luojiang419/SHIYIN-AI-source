@@ -9,13 +9,24 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from canvas_core.video_depth import VideoDepthTaskService, decode_worker_output
+from canvas_core.video_depth_runtime import probe_video_depth_capabilities
+from canvas_core.component_profiles import select_variant
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--variant', action='append', choices=['cpu', 'cuda126', 'cuda128'])
+    parser.add_argument('--auto', action='store_true', help='按本机硬件自动选择运行时并实测')
     parser.add_argument('--output', type=Path, default=ROOT / '.codex-tmp/video-depth-217')
     args = parser.parse_args()
+    capabilities = probe_video_depth_capabilities()
+    if args.auto:
+        if args.variant:
+            parser.error('--auto 不能与 --variant 同时使用')
+        manifest = json.loads((ROOT / 'canvas_core/video_depth_runtime_manifest.json').read_text(encoding='utf-8'))
+        selected = select_variant(manifest['variants'], capabilities)['id']
+        args.variant = [selected.removeprefix('windows-x86_64-')]
+        print(f'Automatic runtime: {selected}', flush=True)
     report = []
     for variant in args.variant or ['cpu', 'cuda126', 'cuda128']:
         print(f'{variant}: preparing fixed runtime', flush=True)
@@ -35,6 +46,7 @@ def main():
         assert old.returncode == 2 and 'invalid choice' in decode_worker_output(old.stderr)
 
         class Runtime:
+            selected_variant_id = 'windows-x86_64-' + variant
             def installation_path(self): return component
 
         class Model:
@@ -42,7 +54,9 @@ def main():
             def installation_path(self): return ROOT / 'tools/video-depth-lab/runtime'
 
         model = Model()
-        service = VideoDepthTaskService(ROOT, model_manager=model, runtime_manager=Runtime())
+        runtime_manager = Runtime()
+        runtime_manager.capabilities = capabilities
+        service = VideoDepthTaskService(ROOT, model_manager=model, runtime_manager=runtime_manager)
         service._source_runtime = lambda: None
         try:
             for tier in ['lite', 'quality']:
@@ -63,7 +77,7 @@ def main():
                 print(f'{variant}/{tier}: real inference and MP4 decode passed', flush=True)
         finally:
             service.close()
-    destination = args.output / 'report.json'
+    destination = args.output / ('auto-report.json' if args.auto else 'report.json')
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(destination)
 

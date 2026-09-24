@@ -238,7 +238,9 @@ class PersonDepthComponentManager:
             except ValueError as exc:
                 raise PersonDepthManifestError(str(exc)) from exc
             current = self._read_current()
-            if str(current.get("version") or "") == str(payload.get("version") or ""):
+            same_device = (self.component_name != 'video-depth-runtime' or
+                           current.get('capabilities') == self.capabilities.public_dict())
+            if same_device and str(current.get("version") or "") == str(payload.get("version") or ""):
                 current_variant = str(current.get("variant") or "")
                 selected = next(
                     (variant for variant in compatible if str(variant.get("id") or "") == current_variant),
@@ -1007,6 +1009,7 @@ class PersonDepthComponentManager:
                     "source": source,
                     "source_label": source_label,
                     "activated_at": int(time.time() * 1000),
+                    "capabilities": self.capabilities.public_dict(),
                 },
             )
 

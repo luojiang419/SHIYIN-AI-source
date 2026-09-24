@@ -25,7 +25,10 @@ def main():
     parser.add_argument('--evidence', type=Path, required=True)
     parser.add_argument('--lan-source', default='http://192.168.0.24:3011')
     parser.add_argument('--resume', action='store_true', help='仅继续本脚本创建的隔离验收目录')
+    parser.add_argument('--reextract', action='store_true', help='复用隔离补齐环境，但用当前后端重新提取两档视频')
     args = parser.parse_args()
+    if args.reextract and not args.resume:
+        parser.error('--reextract 必须与 --resume 同时使用')
     work = args.work_root.resolve()
     work.mkdir(parents=True, exist_ok=args.resume)
     evidence = args.evidence.resolve()
@@ -39,6 +42,11 @@ def main():
     if args.resume:
         report = json.loads((evidence / 'report.json').read_text(encoding='utf-8'))
         assert Path(report['isolatedData']) == data and report['initialComponentsAbsent']
+    if args.reextract:
+        report['cases'] = []
+    report['backend'] = str(args.backend.resolve())
+    with args.backend.open('rb') as stream:
+        report['backendSha256'] = hashlib.file_digest(stream, 'sha256').hexdigest()
     report['success'] = False
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
@@ -123,7 +131,7 @@ def main():
             started = time.monotonic()
             expected_model = api('GET', '/api/video-depth/status')['model']
             existing = []
-            if args.resume:
+            if args.resume and not args.reextract:
                 for path in metadata_files():
                     meta = json.loads(path.read_text(encoding='utf-8'))
                     if meta['model']['key'] == expected_model and Path(meta['input']['path']).name == uploaded['url'].rsplit('/', 1)[-1]:

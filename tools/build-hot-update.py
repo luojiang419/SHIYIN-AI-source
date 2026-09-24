@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from distribution.service import atomic_json, digest, DEFAULT_DATA
 
-DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION = '2.0.5'
+DEFAULT_HOT_UPDATE_MIN_DESKTOP_VERSION = '2.0.6'
 
 
 def version_tuple(value):
@@ -81,6 +81,9 @@ def main():
     parser.add_argument('--notes', default='局域网热更新：功能优化与问题修复')
     parser.add_argument('--publish', action='store_true')
     parser.add_argument('--web-only', action='store_true')
+    parser.add_argument('--backend-dir', type=Path, help='使用已验证的后端目录打包，不重新构建后端')
+    parser.add_argument('--desktop-exe', type=Path, help='使用已发布的桌面宿主，不重新编译')
+    parser.add_argument('--web-dir', type=Path, help='使用已发布的完整前端目录作为底稿')
     parser.add_argument('--bootstrap', action='store_true', help='只发布兼容旧客户端的桌面更新器')
     parser.add_argument('--updater-only', action='store_true', help='发布新版客户端可用的更新器修复小包')
     parser.add_argument('--allow-incompatible-clients', action='store_true', help='允许高于已联网客户端宿主版本的不兼容升级')
@@ -100,14 +103,24 @@ def main():
     desktop_files.append(ROOT/'src-tauri/distribution-baseline.txt')
     backend_files += list((ROOT/'tools/video-depth-lab/worker').glob('*.py')) + [ROOT/'tools/video-depth-lab/scripts/build-worker-overlays.py']
     desktop_hash=fingerprint(desktop_files); backend_hash=fingerprint(backend_files)
-    desktop=ROOT/'src-tauri/target/release/SHIYIN-AI.exe'
-    backend=ROOT/'dist/hot-backend/canvas-backend'
+    desktop=args.desktop_exe.resolve() if args.desktop_exe else ROOT/'src-tauri/target/release/SHIYIN-AI.exe'
+    backend=args.backend_dir.resolve() if args.backend_dir else ROOT/'dist/hot-backend/canvas-backend'
+    if args.desktop_exe and not desktop.is_file(): raise FileNotFoundError(desktop)
+    if args.web_dir and not args.web_dir.is_dir(): raise FileNotFoundError(args.web_dir)
+    if args.backend_dir:
+        # 显式候选由调用方验证；不强迫专项修复同时升级无关的 Topaz 模块。
+        from PyInstaller.archive.readers import CArchiveReader
+        try:
+            prepared = CArchiveReader(str(backend/'canvas-backend.exe')).open_embedded_archive('PYZ.pyz')
+            prepared.extract('main')
+        except (OSError, ValueError, KeyError) as error:
+            raise ValueError('指定后端缺失或冻结归档损坏') from error
     if sum((args.bootstrap, args.updater_only, args.web_only)) > 1:
         raise ValueError('--bootstrap、--updater-only 与 --web-only 不能同时使用')
     if not args.web_only:
-        if state.get('desktop')!=desktop_hash or not desktop.exists():
+        if not args.desktop_exe and (state.get('desktop')!=desktop_hash or not desktop.exists()):
             run(['cargo','build','--release','--manifest-path','src-tauri/Cargo.toml']);state['desktop']=desktop_hash
-        if not args.bootstrap and not args.updater_only and (
+        if not args.backend_dir and not args.bootstrap and not args.updater_only and (
             state.get('backend')!=backend_hash or not backend_supports_current_topaz_models(backend/'canvas-backend.exe')
         ):
             # PyInstaller可能把语法错误的main当成不可导入模块而继续产出EXE。
@@ -135,7 +148,7 @@ def main():
             html=re.sub(r'([?&]v=)[^\s\"\'&<>]+',lambda m:m[1]+args.version,html)
             target.write_text(html,encoding='utf-8')
     else:
-        shutil.copytree(ROOT/'static',files/'app/web',ignore=shutil.ignore_patterns('prototypes'))
+        shutil.copytree(args.web_dir.resolve() if args.web_dir else ROOT/'static',files/'app/web',ignore=shutil.ignore_patterns('prototypes'))
         # 用发布序号统一静态资源缓存参数，避免重启后 WebView 仍读取旧脚本。
         for path in (files/'app/web').rglob('*.html'):
             html=path.read_text('utf-8')

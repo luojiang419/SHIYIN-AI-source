@@ -2,11 +2,11 @@
 
 [CODEX_LONG_TASK_CONTINUE_V3]
 
-- 状态：源码与真实验证已完成；待 Git 交付及必要发布。
-- 下一步：检查本任务差异，隔离其他任务改动后提交并评估热更新发布。
-- TODO：Git 交付、必要发布及安装版验收。
-- 最近验证：SD2.0mini 与 SD FAST 均真实生成成功，下载后完整解码；LinkFox 适配器、积分接口和浏览器节点验证通过。
-- branch/commit：`feat/linkfox-mini-fast-balance` / 待提交；工作区有大量其他任务改动，已仅暂存本任务差异。
+- 状态：源码、真实生成和局域网热更新发布已完成；当前安装版文件与发布包一致，后端已在发布后重启。
+- 下一步：用户在当前安装版打开 LinkFox 视频节点，检查实际画布中的积分文字和视频结果；若特定旧任务仍失败，凭 taskId 精确排查。
+- TODO：用户实际节点交互反馈（如有）。
+- 最近验证：SD2.0mini 与 SD FAST 均真实生成成功并下载、完整解码；浏览器节点显示余额，局域网发布签名和整包下载哈希通过。
+- branch/commit：`feat/linkfox-mini-fast-balance` / `09602f6b`，已推送 `origin/feat/linkfox-mini-fast-balance`；发布从该提交的隔离工作目录构建，未包含工作区其他任务改动。
 - 阻塞：无。
 
 ## 目标与验收
@@ -25,6 +25,7 @@
 
 - SD2.0mini：官方 V3 `doubao-seedance-2-0-mini`、1 张无品牌蓝色方盒图、5 秒、480p、16:9、无声。taskId=`2103060316882571264`，`data.status=3`，`data.count=35`，结果 URL 可下载。文件 `.codex-tmp/linkfox-mini-test/sd2mini-5s-480p.mp4`，778177 字节，SHA-256=`ffdf85ff47ae5cad5b758533bde0613d1e97f547629dbab1b6b3f1cb733eae99`。
 - SD FAST：现有技能网关 `SEED_FAST`，相同最小参数与测试图。taskId=`2103061161080844288`，状态 `SUCCESS`，结果 URL 可下载。文件 `.codex-tmp/linkfox-fast-test/sd2fast-5s-480p.mp4`，668087 字节，SHA-256=`6e4520398f3d96f7ab192b4f65da8356087f1f0015456a7f472b90bf4d8088ae`。
+- 提交到首次查询成功：Mini 约 165 秒，Fast 约 124 秒；提交到本地文件下载完成：Mini 约 180 秒，Fast 约 138 秒。查询为轮询，实际平台完成时间可能早于首次成功查询。
 - 两个文件 `ffprobe` 均为 H.264、864×496、121 帧、5.041667 秒；`ffmpeg` 完整解码无报错。另调用当前源码的 `save_remote_video_to_output` 函数对两条成功任务实际落盘，分别得到 `/assets/output/linkfox_mini_*.mp4` 和 `/assets/output/linkfox_fast_*.mp4`，文件存在、大小一致、MP4 文件头正确。
 - 当前已安装版的两条旧 LinkFox 任务也均有实际 `/assets/output` 本地文件。此前“始终无法获取到本地”的具体用户任务未提供 taskId，因此不能据这几条成功任务推断该任务的失败原因。
 
@@ -35,6 +36,13 @@
 - `static/js/canvas-linkfox-video.js` 与两个画布页面：显示和手动刷新 LinkFox 剩余积分，生成完成后自动刷新；增加 Mini 模型并关闭其不支持的 Pro/多段运镜开关。
 - `canvas_core/video_prompt_registry.py`：让 Mini 使用 Seedance 2.0 提示词规则。
 - Python 定向测试 79 项通过；Node 异步交互测试通过；经典视频与影视视频节点浏览器实测显示余额、Fast 与 Mini 模型切换和回传通过；`py_compile`、JS 语法检查和 `git diff --check` 通过。
+
+## 局域网热更新交付
+
+- 隔离 worktree：`D:\data\codex\tree\linkfox-mini-release\SHIYIN-AI`，从提交 `09602f6b` 构建。前端使用已发布 `20260924174208` 为底稿，仅覆盖四个 LinkFox 文件；桌面宿主复用当前 2.0.6 已安装 EXE，后端 sidecar 重新编译。未执行全量安装器流程。
+- 热更新 `20260924184255` 已发布，1037 文件，整包 229034282 字节，SHA-256=`1fb8a35fba7d155fddcd83e33e9f520428e40bc121518266227a9472da6f4178`。客户端目录和计划签名有效，整包下载哈希与本地 manifest 一致；最低桌面版本保持当前活动热更新的 `2.0.0`，继续支持旧 2.0.x 过渡客户端。
+- 冻结后端包含 Mini V3 提交、查询和积分路由；发布包前端 JS/CSS 与提交源码逐字节一致。当前 `D:\Program Files\SHIYIN AI\app` 中的 LinkFox JS 和后端 EXE 与发布包哈希相同，后端进程于 18:52:06 启动（晚于文件应用时间 18:51:57）。当前安装版实际画布没有通过人工点击复核。
+- `.build` 与 `.codex-tmp` 上限已检查，主工作区分别约 12.20 GiB 与不足 0.01 GiB；隔离构建目录清理脚本已执行。
 
 ## 官方文档
 

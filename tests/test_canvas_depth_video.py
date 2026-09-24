@@ -1,5 +1,6 @@
 import io
 import json
+import pytest
 from pathlib import Path
 
 import canvas_core.video_depth as video_depth
@@ -130,7 +131,9 @@ def test_video_depth_service_closes_persistent_worker(tmp_path):
     assert service._worker_process is None
 
 
-def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, monkeypatch):
+@pytest.mark.parametrize('broken_pipe', [False, True])
+@pytest.mark.parametrize('unsupported_serve', [False, True])
+def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, monkeypatch, broken_pipe, unsupported_serve):
     service = VideoDepthTaskService(tmp_path)
     service.worker.parent.mkdir(parents=True)
     service.worker.write_text("# worker", encoding="utf-8")
@@ -143,7 +146,9 @@ def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, mo
     launches = []
 
     class Input:
-        def write(self, _content): pass
+        def write(self, _content):
+            if broken_pipe:
+                raise BrokenPipeError('worker has closed stdin')
         def flush(self): pass
 
     class Process:
@@ -151,12 +156,13 @@ def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, mo
             launches.append(command)
             self.stdin = Input() if "serve" in command else None
             self.stdout = io.BytesIO(b"")
-            self.stderr = io.BytesIO(b"")
+            self.stderr = io.BytesIO(b"error: argument command: invalid choice: 'serve' (choose from 'infer', 'status')" if unsupported_serve else b'CUDA out of memory')
             self.returncode = 0
 
         # Windows may report the process as running briefly after stdout reaches
         # EOF. The fallback must not depend on poll() observing the exit yet.
         def poll(self): return None if self.stdin else 0
+        def kill(self): self.returncode = -1
         def wait(self, timeout=None): return self.poll()
         def communicate(self):
             output_dir = Path(launches[-1][launches[-1].index("--output-dir") + 1])
@@ -171,5 +177,55 @@ def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, mo
     service._run("task", source, tmp_path / "output", lambda path: "/" + Path(path).name)
 
     assert "serve" in launches[0]
+    if not unsupported_serve:
+        assert len(launches) == 1
+        assert service.get('task')['status'] == 'failed'
+        assert 'CUDA out of memory' in service.get('task')['error']
+        return
     assert "infer" in launches[1]
     assert service.get("task")["status"] == "done"
+
+
+@pytest.mark.parametrize('change', ['model', 'environment'])
+def test_persistent_worker_restarts_when_model_or_model_root_changes(tmp_path, monkeypatch, change):
+    class Manager:
+        selected_variant_id = 'lite'
+    manager = Manager()
+    service = VideoDepthTaskService(tmp_path, model_manager=manager)
+    environment = {'SHIYIN_VIDEO_DEPTH_MODEL_ROOT': 'first'}
+    monkeypatch.setattr(service, '_runtime', lambda: {
+        'mode': 'source', 'command': ['worker'], 'cwd': tmp_path,
+        'env': dict(environment), 'modelReady': True,
+    })
+    launches = []
+
+    class Process:
+        def __init__(self, command, **kwargs):
+            launches.append(self)
+            self.stdin = io.BytesIO()
+            self.stderr = io.BytesIO()
+            self.stopped = False
+            output = Path(command[command.index('--output-dir') + 1]) / 'depth-preview.mp4'
+            output.write_bytes(b'video')
+            self.stdout = io.BytesIO(json.dumps({'type': 'result', 'result': {'outputVideoPath': str(output)}}).encode() + b'\n')
+        def poll(self): return 0 if self.stopped else None
+        def wait(self, timeout=None):
+            self.stopped = True
+            return 0
+
+    monkeypatch.setattr(video_depth.subprocess, 'Popen', Process)
+    try:
+        for index in range(2):
+            if index:
+                if change == 'model':
+                    manager.selected_variant_id = 'quality'
+                else:
+                    environment['SHIYIN_VIDEO_DEPTH_MODEL_ROOT'] = 'second'
+            task_id = str(index)
+            service._tasks[task_id] = {'id': task_id}
+            service._run(task_id, tmp_path / 'input.mp4', tmp_path / task_id, lambda path: '/video.mp4')
+            assert service.get(task_id)['status'] == 'done'
+        assert len(launches) == 2
+        assert launches[0].stopped
+    finally:
+        service.close()

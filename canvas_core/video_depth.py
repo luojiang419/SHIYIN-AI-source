@@ -89,6 +89,7 @@ class VideoDepthTaskService:
         self._worker_process: subprocess.Popen | None = None
         self._worker_runtime_key = ""
         self._worker_stderr = deque(maxlen=64)
+        self._stderr_thread: threading.Thread | None = None
 
     def _model_key(self) -> str:
         if self.model_manager is None:
@@ -113,7 +114,11 @@ class VideoDepthTaskService:
                     process.stdin.flush()
                 process.wait(timeout=3)
             except Exception:
-                process.kill()
+                try:
+                    process.kill()
+                    process.wait(timeout=3)
+                except OSError:
+                    pass
 
     def _source_runtime(self) -> dict[str, Any] | None:
         details: dict[str, Any] = {}
@@ -303,6 +308,13 @@ class VideoDepthTaskService:
                 self._update(task_id, status="failed", error="深度视频模型安装后仍不可用", message="深度视频模型安装失败")
                 return
         model_key = self._model_key()
+        self._update(task_id, model=model_key, modelLabel=self._model_label())
+        if runtime.get('mode') in {'managed', 'packaged'}:
+            from canvas_core.video_depth_overlay import prepare_worker
+            overlays = Path(__file__).resolve().parent / 'video_depth_workers'
+            if not overlays.is_dir():
+                overlays = self.lab_root / 'worker-overlays'
+            runtime = {**runtime, 'command': [str(prepare_worker(Path(runtime['command'][0]), overlays))]}
         command = [
             *runtime["command"], "serve",
             "--model", model_key,
@@ -317,7 +329,7 @@ class VideoDepthTaskService:
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         self._update(task_id, status="running", progress=1, message="正在启动深度视频模型")
         try:
-            runtime_key = json.dumps([runtime["command"], runtime["cwd"]], default=str)
+            runtime_key = json.dumps([runtime["command"], runtime["cwd"], runtime['env'], model_key], default=str, sort_keys=True)
             process = self._worker_process
             if process is None or getattr(process, "poll", lambda: 0)() is not None or self._worker_runtime_key != runtime_key:
                 if process is not None:
@@ -328,7 +340,8 @@ class VideoDepthTaskService:
                 )
                 self._worker_process = process
                 self._worker_runtime_key = runtime_key
-                self._worker_stderr.clear()
+                self._worker_stderr = deque(maxlen=64)
+                stderr_buffer = self._worker_stderr
 
                 def drain_stderr():
                     if process.stderr:
@@ -336,9 +349,10 @@ class VideoDepthTaskService:
                             chunk = process.stderr.read(4096)
                             if not chunk:
                                 break
-                            self._worker_stderr.append(chunk)
+                            stderr_buffer.append(chunk)
 
-                threading.Thread(target=drain_stderr, daemon=True).start()
+                self._stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
+                self._stderr_thread.start()
             result: dict[str, Any] | None = None
             worker_error = ''
             request_id = uuid.uuid4().hex
@@ -349,8 +363,13 @@ class VideoDepthTaskService:
                     "input": str(source), "output_dir": str(output_dir), "input_size": 322,
                     "target_fps": -1, "max_frames": -1, "max_resolution": -1, "params": {},
                 }
-                process_stdin.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-                process_stdin.flush()
+                try:
+                    process_stdin.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+                    process_stdin.flush()
+                except (BrokenPipeError, OSError):
+                    # Old command parsers can close stdin before the first write.
+                    # Read their output below before deciding whether to retry.
+                    pass
             assert process.stdout is not None
             for line in process.stdout:
                 try:
@@ -374,6 +393,11 @@ class VideoDepthTaskService:
                 # the persistent `serve` command yet. EOF is sufficient evidence:
                 # on Windows poll() can briefly remain None after stdout closes.
                 self.close()
+                if self._stderr_thread:
+                    self._stderr_thread.join(timeout=3)
+                detail = ''.join(decode_worker_output(chunk) for chunk in self._worker_stderr).strip()
+                if not ('invalid choice' in detail and "'serve'" in detail):
+                    raise RuntimeError(detail[-1200:] or '深度视频 worker 意外退出，未返回生成结果；请检查运行时与可用内存')
                 legacy_command = list(command)
                 legacy_command[len(runtime["command"])] = "infer"
                 legacy = subprocess.Popen(
@@ -385,6 +409,8 @@ class VideoDepthTaskService:
                     try:
                         event = json.loads(line)
                     except ValueError:
+                        continue
+                    if not isinstance(event, dict):
                         continue
                     if event.get("type") == "result" and isinstance(event.get("result"), dict):
                         result = event["result"]
@@ -403,13 +429,14 @@ class VideoDepthTaskService:
                 raise RuntimeError(stderr.strip().splitlines()[-1] if stderr.strip() else f"深度视频 worker 退出码 {code}")
             self._update(task_id, **self._output_result(output_dir, result or {}, url_for_path))
         except BaseException as error:
+            self.close()
             self._update(task_id, status="failed", error=str(error)[:1000], message=str(error)[:240])
             if self.bug_reporter:
                 from canvas_core.bug_reporter import gpu_diagnostics
                 worker_status = {}
                 try:
                     diagnostic = subprocess.run([*runtime['command'], 'status'], cwd=runtime['cwd'],
-                        env=runtime['env'], capture_output=True, text=True, timeout=8,
+                        env=runtime['env'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=8,
                         creationflags=flags)
                     for line in diagnostic.stdout.splitlines():
                         event = json.loads(line)

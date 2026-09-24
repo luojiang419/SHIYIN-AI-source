@@ -1,7 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import runpy
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+
+# 固定运行时保留原依赖；应用层 worker 必须随 backend 同步更新。
+runpy.run_path('tools/video-depth-lab/scripts/build-worker-overlays.py', run_name='__main__')
 
 # 点击抠图运行时和 SAM 权重作为按需组件分发，不再进入全量安装器。
 hiddenimports = collect_submodules("uvicorn") + collect_submodules("websockets") + [
@@ -17,6 +21,7 @@ a = Analysis(
     pathex=["."],
     binaries=[],
     datas=[
+        ("tools/video-depth-lab/worker-overlays", "canvas_core/video_depth_workers"),
         ("canvas_core/distribution-public-key.hex", "canvas_core"),
         ("canvas_core/person_depth_manifest.json", "canvas_core"),
         ("canvas_core/cutout_runtime_manifest.json", "canvas_core"),

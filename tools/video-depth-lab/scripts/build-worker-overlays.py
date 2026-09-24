@@ -8,6 +8,8 @@ import struct
 import tempfile
 import zipfile
 import zlib
+import sys
+import importlib.util
 
 from PyInstaller.archive.readers import CArchiveReader
 from PyInstaller.archive.writers import CArchiveWriter
@@ -19,6 +21,8 @@ PROJECT = ROOT.parents[1]
 def update_pyz(data: bytes) -> bytes:
     if data[:4] != b'PYZ\0':
         raise ValueError('未知 PYZ 格式')
+    if data[4:8] != importlib.util.MAGIC_NUMBER:
+        raise ValueError('构建 Python 与运行时字节码版本不一致')
     offset = struct.unpack('!i', data[8:12])[0]
     toc = dict(marshal.loads(data[offset:]))
     output = io.BytesIO()
@@ -70,6 +74,8 @@ def build(source: Path, target: Path):
 
 
 if __name__ == '__main__':
+    if sys.version_info[:2] != (3, 12):
+        raise SystemExit('worker overlay 必须使用 Python 3.12 构建')
     output = ROOT / 'worker-overlays'
     output.mkdir(exist_ok=True)
     manifest = {}
@@ -80,6 +86,7 @@ if __name__ == '__main__':
             exe.write_bytes(zip_file.read('runtime/video-depth-worker/video-depth-worker.exe'))
             target = output / f'{variant}.exe'
             build(exe, target)
-            manifest[variant] = {'file': target.name, 'sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+            manifest[variant] = {'file': target.name, 'sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
+                                 'source_sha256': hashlib.sha256(exe.read_bytes()).hexdigest()}
             print(variant, target.stat().st_size)
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

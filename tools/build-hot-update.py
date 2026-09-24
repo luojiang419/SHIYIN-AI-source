@@ -98,6 +98,7 @@ def main():
     desktop_files=list((ROOT/'src-tauri/src').rglob('*.rs'))+list((ROOT/'src-tauri').glob('*.toml'))+list((ROOT/'src-tauri').glob('*.json'))+list((ROOT/'desktop-placeholder').rglob('*'))+[ROOT/'src-tauri/distribution-public-key.hex',ROOT/'src-tauri/build.rs']
     backend_files=list((ROOT/'canvas_core').rglob('*.py'))+list((ROOT/'canvas_core').glob('*.json'))+[ROOT/'main.py',ROOT/'backend_entry.py',ROOT/'canvas-backend.spec',ROOT/'canvas_core/distribution-public-key.hex']
     desktop_files.append(ROOT/'src-tauri/distribution-baseline.txt')
+    backend_files += list((ROOT/'tools/video-depth-lab/worker').glob('*.py')) + [ROOT/'tools/video-depth-lab/scripts/build-worker-overlays.py']
     desktop_hash=fingerprint(desktop_files); backend_hash=fingerprint(backend_files)
     desktop=ROOT/'src-tauri/target/release/SHIYIN-AI.exe'
     backend=ROOT/'dist/hot-backend/canvas-backend'

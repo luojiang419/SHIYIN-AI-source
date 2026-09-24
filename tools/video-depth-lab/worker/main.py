@@ -492,6 +492,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # JSON-lines pipes are UTF-8 regardless of the Windows system code page.
+    # PyInstaller may ignore PYTHONIOENCODING, so configure streams explicitly.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     args = build_parser().parse_args()
     try:
         if args.command == "serve":

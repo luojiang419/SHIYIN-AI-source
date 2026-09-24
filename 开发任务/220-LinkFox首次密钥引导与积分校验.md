@@ -6,7 +6,7 @@
 - 下一步：若需向局域网客户端发布，按现有热更新流程从已验证提交构建。
 - TODO：无代码未完成项。
 - 最近验证：`node --check` 检查 3 个修改过的 JS、`node tests/support/linkfox_key_setup_browser_check.cjs`、`node tests/support/linkfox_async_unit.cjs`、`node tests/support/linkfox_unified_browser_check.cjs` 及暂存区 `git diff --check` 通过；浏览器截图检查弹窗布局正常。
-- branch/commit：`feat/linkfox-mini-fast-balance` / `8c654e15`；推送状态待更新。
+- branch/commit：`feat/linkfox-mini-fast-balance` / `8c654e15`（功能）、`16c51388`（验证记录）；已推送 `origin/feat/linkfox-mini-fast-balance`。
 - 阻塞：无。
 
 ## 目标与实现

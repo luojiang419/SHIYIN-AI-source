@@ -126,3 +126,22 @@ def test_status_queries_are_separate(provider_id,endpoint):
     assert requests[0].url.path == endpoint
     assert result['generation_enabled'] is True
     assert result['resolutions'] == (['768P','1080P','2K','4K'] if provider_id=='youyun-h3' else ['local-preset'])
+    if provider_id == 'youyun-h3':
+        assert result['defaults']['available_points'] == 10
+
+
+@pytest.mark.parametrize('balance,expected_enabled,expected_points', [
+    ({'available_points': 1150}, True, 1150),
+    ({'available_points': 0}, False, 0),
+    ({'unexpected': 1150}, False, None),
+    ({'available_points': '1150'}, False, None),
+])
+def test_youyun_status_only_reports_valid_provider_points(balance, expected_enabled, expected_points):
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=balance)))
+        with patch.object(main.httpx, 'AsyncClient', return_value=client), patch.object(main, 'get_api_provider', return_value={'id':'youyun-h3','base_url':'https://example.test'}), patch.object(main, 'provider_env_key_value', return_value='test-key'):
+            return await main.youyun_h3_status()
+    result = asyncio.run(run())
+    assert result['generation_enabled'] is expected_enabled
+    assert result['defaults'].get('available_points') == expected_points
+    assert result['available'] is (expected_points is not None)

@@ -1672,12 +1672,14 @@ async function loadYouyunH3Status({renderAfter=false}={}){
         })().finally(() => { youyunH3StatusTask = null; });
     }
     const state = await youyunH3StatusTask;
-    if(renderAfter) render();
+    if(renderAfter) refreshNodes(nodes.filter(isYouyunH3VideoNode).map(node => node.id));
     return state;
 }
 function youyunH3ConnectionNote(){
     if(youyunH3State.loading) return '正在检查 优云智算H3 服务…';
-    if(youyunH3State.generationEnabled) return '优云智算H3 已就绪';
+    const points = youyunH3State.defaults?.available_points;
+    if(typeof points === 'number' && Number.isFinite(points) && points >= 0)
+        return `优云智算H3 · 可用积分 ${points.toLocaleString('zh-CN')}${youyunH3State.generationEnabled ? ' · 已就绪' : ''}`;
     return youyunH3State.error || '优云智算H3 不可用，请检查 API 设置。';
 }
 function ensureKlingCapabilities(){
@@ -11501,6 +11503,7 @@ function bindClassicFilmNode(el,node){
             if(node.apiProvider !== preferenceProvider){
                 preferenceProvider=node.apiProvider;
                 applyPersonalGenerationDefaults(node,node.type === 'film-video' ? 'video' : 'image');
+                if(isYouyunH3VideoNode(node)) void loadYouyunH3Status({renderAfter:true});
             }
             scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0);
         },
@@ -12146,6 +12149,8 @@ function renderNode(node){
         imageModelOptions:filmNodeImageModelOptions,
         assets:classicFilmAssets
     });
+    if(node.type === 'film-video' && isYouyunH3VideoNode(node))
+        body.querySelector('.film-video-h3-note')?.insertAdjacentHTML('afterend', `<div class="muted-note film-video-balance-note" role="status">${escapeHtml(youyunH3ConnectionNote())}</div>`);
     if(node.type === 'film-video' && isKlingVideoNode(node)){
         ensureKlingCapabilities();
         body.querySelector('.film-video-settings')?.insertAdjacentHTML('beforeend', shouldUseKlingWebBridge(node)
@@ -15373,6 +15378,7 @@ function renderVideoBody(node){
         applyPersonalGenerationDefaults(node, 'video');
         render();
         scheduleSave();
+        if(isYouyunH3VideoNode(node)) void loadYouyunH3Status({renderAfter:true});
     };
     modelSelect.onchange = e => {
         e.stopPropagation();
@@ -17425,6 +17431,7 @@ async function runVideoNode(nodeId, opts={}){
         node.running = hasActiveVideoRuns(node);
         if(node.running && ['done','failed'].includes(node.runStatus)) node.runStatus = 'running';
         refreshRunNodes(node, out);
+        if(isYouyunH3VideoNode(node)) void loadYouyunH3Status({renderAfter:true});
     }
 }
 async function uploadCanvasUrlToComfy(url){

@@ -23764,20 +23764,22 @@ async def youyun_h3_status():
             response = await client.get(f"{base_url}/minimax/v2/query/point_usage_summary", headers=youyun_h3_headers(provider))
             response.raise_for_status()
             balance = response.json()
+            if not isinstance(balance, dict) or isinstance(balance.get("available_points"), bool) or not isinstance(balance.get("available_points"), int) or balance["available_points"] < 0:
+                raise ValueError("优云智算H3 返回了无效积分余额")
     except Exception:
         return {
             "available": False,
             "generation_enabled": False,
             "resolutions": [],
             "defaults": {},
-            "error": "无法连接优云智算H3 服务，请检查 API Key、余额和网络。",
+            "error": "优云智算H3 积分读取失败，请检查 API Key、网络或平台响应。",
         }
     return {
         "available": True,
-        "generation_enabled": True,
+        "generation_enabled": balance["available_points"] > 0,
         "resolutions": ["768P", "1080P", "2K", "4K"],
-        "defaults": {"available_points": balance.get("available_points", 0)},
-        "error": "",
+        "defaults": {"available_points": balance["available_points"]},
+        "error": "" if balance["available_points"] > 0 else "优云智算H3 可用积分为 0",
     }
 
 def can_manage_kling_cli(request: Request) -> bool:

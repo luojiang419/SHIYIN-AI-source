@@ -4466,7 +4466,9 @@ async function loadSmartYouyunH3Status(){
 }
 function smartYouyunH3ConnectionNote(){
     if(smartYouyunH3State.loading) return '正在检查 优云智算H3 服务…';
-    if(smartYouyunH3State.generationEnabled) return '优云智算H3 已就绪';
+    const points = smartYouyunH3State.defaults?.available_points;
+    if(typeof points === 'number' && Number.isFinite(points) && points >= 0)
+        return `优云智算H3 · 可用积分 ${points.toLocaleString('zh-CN')}${smartYouyunH3State.generationEnabled ? ' · 已就绪' : ''}`;
     return smartYouyunH3State.error || '优云智算H3 不可用，请检查 API 设置。';
 }
 function smartKlingConnectionNote(){
@@ -5891,6 +5893,9 @@ function setDynamicSetting(key, value){
             syncH3SmartVideoDimensions(settings);
             settings.videoMultimodal = true; settings.videoUseFrameRoles = false;
         }
+        if(isYouyunH3SmartSettings(settings)) void loadSmartYouyunH3Status().then(() => {
+            if(isYouyunH3SmartSettings(settings)) renderDynamicParams();
+        });
     }
     if(isMiniMaxH3SmartSettings(settings) && ['videoAspect','videoResolution'].includes(key)) syncH3SmartVideoDimensions(settings,key);
     if(key === 'videoMultimodal') settings._videoMultimodalUserSet = true;
@@ -19525,6 +19530,9 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             body:JSON.stringify(payload)
         }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
         if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
+        if(isYouyunH3SmartSettings(runSettings)) void loadSmartYouyunH3Status().then(() => {
+            if(isYouyunH3SmartSettings(settings)) renderDynamicParams();
+        });
         window.CanvasFilmNodes.rememberVideoPromptResult(sourceNode,result?.request);
         return window.CanvasFilmNodes.videoGenerationOutputs(resultMediaUrls(result),result?.request);
     } finally {

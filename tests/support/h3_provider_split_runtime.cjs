@@ -23,7 +23,9 @@ async function run(){
     const apiProviders=providers;
     const tr=value=>value; const escapeHtml=value=>String(value); const escapeAttr=escapeHtml;
     const defaultApiProviders=()=>providers;
-    const minimaxH3ConnectionNote=()=> '本地 H3'; const youyunH3ConnectionNote=()=> '优云智算H3';
+    const minimaxH3ConnectionNote=()=> '本地 H3';
+    let youyunH3State={loading:false,generationEnabled:true,defaults:{available_points:1150},error:''};
+    ${fn(classic,'youyunH3ConnectionNote')}
     ${['isYouyunH3VideoNode','isMiniMaxH3VideoNode','videoApiProviders','resolveVideoProviderId','videoProviderOptions'].map(n=>fn(classic,n)).join('\n')}
     ${classic.slice(classic.indexOf('const MINIMAX_H3_VIDEO_RESOLUTIONS ='),classic.indexOf('function videoModelOptions('))}
     ${fn(classic,'youyunH3VideoSettingsHtml')}
@@ -38,7 +40,7 @@ async function run(){
     window.drawFilm=()=>{
       CanvasFilmNodes.normalize(filmNode);
       const root=document.querySelector('#film');
-      root.innerHTML='<h2>影视视频节点</h2>'+CanvasFilmNodes.h3VideoSettingsHtml(filmNode,videoProviderOptions(filmNode.apiProvider),'<option>'+filmNode.model+'</option>');
+      root.innerHTML='<h2>影视视频节点</h2>'+CanvasFilmNodes.h3VideoSettingsHtml(filmNode,videoProviderOptions(filmNode.apiProvider),'<option>'+filmNode.model+'</option>')+(filmNode.apiProvider==='youyun-h3'?'<div class="film-video-balance-note">'+youyunH3ConnectionNote()+'</div>':'');
       CanvasFilmNodes.bind(root,filmNode,{defaultModel:id=>providers.find(p=>p.id===id).video_models[0],onChange:()=>drawFilm()});
     };drawFilm();
   `});
@@ -48,7 +50,9 @@ async function run(){
     const providerVideoModels=id=>providers.find(p=>p.id===id)?.video_models||[];
     const filterJimengVideoModels=value=>value;
     const isKlingSmartSettings=()=>false;
-    const smartMiniMaxH3ConnectionNote=()=> '本地 H3'; const smartYouyunH3ConnectionNote=()=> '优云智算H3';
+    const smartMiniMaxH3ConnectionNote=()=> '本地 H3';
+    let smartYouyunH3State={loading:false,generationEnabled:true,defaults:{available_points:1150},error:''};
+    ${fn(smart,'smartYouyunH3ConnectionNote')}
     ${['isYouyunH3SmartSettings','isMiniMaxH3SmartSettings','h3SmartVideoResolutions','h3SmartAspectForResolution','h3SmartResolutionForAspect','syncH3SmartVideoDimensions','renderVideoProviderControl','renderVideoModelControl','renderVideoDurationControl','videoAspectIconClass','renderH3VideoAspectControl','renderH3VideoResolutionControl','renderH3VideoStepsControl','renderVideoToggleControl','renderApiVideoParams'].map(n=>fn(smart,n)).join('\n')}
     window.drawSmart=()=>{renderApiVideoParams();};drawSmart();
     dynamicParams.addEventListener('click',e=>{const button=e.target.closest('[data-smart-param]');if(button){settings[button.dataset.smartParam]=button.dataset.smartValue;if(button.dataset.smartParam==='videoProvider')settings.videoModel='';syncH3SmartVideoDimensions(settings);drawSmart();}});
@@ -65,6 +69,7 @@ async function run(){
   for(const panel of ['classic','film','smart']){
     const text=await page.locator('#'+panel).textContent();
     assert.match(text,/768P/);assert.match(text,/4K/);assert.match(text,/移除音轨/);assert.doesNotMatch(text,/采样步数|0\.2MP/);
+    assert.match(text,/优云智算H3.*可用积分 1,150/);
   }
   await page.selectOption('#film [data-film-field="resolution"]','2K');
   assert.equal(await page.locator('#film [data-film-field="resolution"]').inputValue(),'2K');
@@ -79,8 +84,10 @@ async function run(){
   await page.selectOption('#film [data-film-field="apiProvider"]','minimax-h3');
   await page.locator('#smart [data-smart-param="videoProvider"][data-smart-value="minimax-h3"]').click();
   for(const panel of ['classic','film','smart']){
-    const text=await page.locator('#'+panel).textContent();assert.match(text,/采样步数/);assert.match(text,/0\.2MP/);assert.doesNotMatch(text,/移除音轨/);
+    const text=await page.locator('#'+panel).textContent();assert.match(text,/采样步数/);assert.match(text,/0\.2MP/);assert.doesNotMatch(text,/移除音轨|可用积分/);
   }
+  assert.match(classic,/film-video-balance-note/);
+  assert.equal(await page.evaluate(()=>youyunH3ConnectionNote.call(null)), '优云智算H3 · 可用积分 1,150 · 已就绪');
   assert.equal(await page.locator('#film [data-film-field="steps"]').inputValue(),'2');
   for(const selector of ['#classic .video-duration','#film [data-film-field="duration"]','#smart [data-param="videoDuration"]']){
     assert.equal(await page.locator(selector).getAttribute('min'),'1');assert.equal(await page.locator(selector).getAttribute('max'),'15');

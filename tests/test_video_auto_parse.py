@@ -141,12 +141,23 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
 def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():
     # 按钮的 data 属性来自上一次渲染，连接关系变化后可能短暂过期；
     # 点击时必须依据当前输入和参考图再次选择自动解析。
-    assert "const currentPrompt = [String(original || node.prompt || '').trim(), connectedCanvasPromptText(node)]" in CANVAS
+    assert "const currentPrompt = [String(original || '').trim(), connectedPromptBeforeTask]" in CANVAS
     assert "const autoParseNow = !currentPrompt && refs.some(item=>item?.url)" in CANVAS
     assert "const mode = autoParseNow ? 'auto-parse'" in CANVAS
-    assert "const currentPrompt=[String(prompt.value || '').trim(), externalPromptText(node, options)]" in FILM
+    assert "const currentPrompt=[String(source || '').trim(), externalPromptText(node, options)]" in FILM
     assert "const autoParseNow=!currentPrompt && currentRefs.length>0" in FILM
     assert "const mode=autoParseNow ? 'auto-parse'" in FILM
+
+
+def test_repeated_video_prompt_task_clears_previous_result_before_new_request():
+    # 回填结果只用来显示；再次点击以原始输入或用户后续修改为新请求来源。
+    assert "const original = previous && current === previous.result ? previous.source : current" in CANVAS
+    assert "delete node.videoPromptLastResult" in CANVAS
+    assert "node.videoPromptTaskResult = {source:original, result:input.value}" in CANVAS
+    assert "const source=previous && current===previous.result ? previous.source : current" in FILM
+    assert "delete node.videoPromptLastResult" in FILM
+    assert "node.videoPromptTaskResult={source,result:prompt.value}" in FILM
+    assert "node.videoPromptTaskResult={source,result:node.prompt}" in FILM
 
 
 def test_refilled_prompt_does_not_resubmit_unchanged_connected_prompt():

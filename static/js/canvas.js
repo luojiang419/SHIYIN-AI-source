@@ -22486,28 +22486,39 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
     button.onclick = async e => {
         e.preventDefault(); e.stopPropagation();
         if(button.disabled) return;
-        const original = input.value;
+        const current = String(input.value || '');
+        const previous = node.videoPromptTaskResult;
+        const original = previous && current === previous.result ? previous.source : current;
+        delete node.videoPromptTaskResult;
+        delete node.videoPromptLastResult;
+        delete node._videoPromptExternalSnapshot;
+        input.value = original;
+        node.prompt = original;
+        input.dispatchEvent(new Event('input', {bubbles:true}));
         const connectedPromptBeforeTask = connectedCanvasPromptText(node);
         const connectedPromptForTask = connectedCanvasPromptTextForSubmission(node);
         // 渲染时的 data-video-prompt-mode 可能因连接关系或输入框状态尚未同步而过期。
         // 点击瞬间重新判断：空提示词且仅连接图片时必须走自动解析，不能误调用
         // 需要非空文本的润色接口。
-        const currentPrompt = [String(original || node.prompt || '').trim(), connectedCanvasPromptText(node)].filter(Boolean).join('\n\n');
+        const currentPrompt = [String(original || '').trim(), connectedPromptBeforeTask].filter(Boolean).join('\n\n');
         const imageRefs = (refs || []).filter(item => item?.kind === 'image' && item?.url);
         const autoParseNow = !currentPrompt && refs.some(item=>item?.url)
             && (refs || []).filter(item => item?.url).every(item => ['image','video'].includes(item?.kind));
-        const mode = autoParseNow ? 'auto-parse' : (button.dataset.videoPromptMode || 'polish');
+        const mode = autoParseNow ? 'auto-parse' : 'polish';
         button.disabled = true; button.classList.add('is-loading');
         const label = button.querySelector('span'); if(label) label.textContent = mode === 'auto-parse' ? '解析中…' : '润色中…';
         try {
             const showProgress = task => renderCanvasPromptTaskProgress(input, original, task);
             input.value = mode === 'auto-parse'
                 ? await autoParseCanvasVideoPrompt(node, refs, showProgress, currentPrompt)
-                : await polishCanvasVideoPrompt(node, [String(original || node.prompt || '').trim(), connectedPromptForTask].filter(Boolean).join('\n\n'), refs, showProgress);
+                : await polishCanvasVideoPrompt(node, [String(original || '').trim(), connectedPromptForTask].filter(Boolean).join('\n\n'), refs, showProgress);
+            node.videoPromptTaskResult = {source:original, result:input.value};
             if(connectedPromptBeforeTask) node._videoPromptExternalSnapshot = connectedPromptBeforeTask;
             else delete node._videoPromptExternalSnapshot;
             input.dispatchEvent(new Event('input', {bubbles:true}));
         } catch(error) {
+            input.value = original;
+            input.dispatchEvent(new Event('input', {bubbles:true}));
             showErrorModal(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败'), mode === 'auto-parse' ? '自动解析' : '提示词润色');
         } finally {
             button.disabled = false; button.classList.remove('is-loading');

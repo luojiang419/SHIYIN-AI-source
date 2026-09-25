@@ -11,7 +11,12 @@ const assert=require('node:assert/strict');
         page.on('pageerror',error=>errors.push(error.message));
         for(const kind of ['canvas-prompt-polish-tasks','canvas-video-auto-parse-tasks']){
             await page.route(`**/api/${kind}`,async route=>{
-                requests.push({kind,payload:route.request().postDataJSON()});
+                const editorValues=await page.evaluate(()=>({
+                    classic:document.querySelector('[data-id="video"] .generator-prompt-input')?.value,
+                    film:document.querySelector('[data-film-field="prompt"]')?.value,
+                    ecom:document.querySelector('[data-id="ecom-repeat"] .generator-prompt-input')?.value,
+                }));
+                requests.push({kind,payload:route.request().postDataJSON(),editorValues});
                 await route.fulfill({json:{task_id:`repeat-${requests.length}`}});
             });
         }
@@ -89,6 +94,10 @@ const assert=require('node:assert/strict');
         await ecom.locator('[data-video-prompt-polish]').click();
         await page.waitForFunction(()=>nodes.find(n=>n.id==='ecom-repeat').prompt==='新结果 13');
         assert.deepEqual(requests.slice(11,13).map(item=>item.payload.prompt),['商品原始创意','商品原始创意']);
+        assert(requests.every((item,index)=>{
+            const editor=index===2 || index===3 || (index>=6 && index<=9) ? 'film' : index>=11 ? 'ecom' : 'classic';
+            return item.editorValues[editor]==='';
+        }),'新请求发出前必须清空对应编辑框');
         assert.deepEqual(errors,[]);
         console.log(JSON.stringify({requests:requests.length,classicPolish:true,filmPolish:true,classicAutoParse:true,filmAutoParse:true,filmParseButton:true,ecomPolish:true,manualEdit:true}));
     } finally {await browser.close();}

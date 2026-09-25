@@ -22492,9 +22492,6 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         delete node.videoPromptTaskResult;
         delete node.videoPromptLastResult;
         delete node._videoPromptExternalSnapshot;
-        input.value = original;
-        node.prompt = original;
-        input.dispatchEvent(new Event('input', {bubbles:true}));
         const connectedPromptBeforeTask = connectedCanvasPromptText(node);
         const connectedPromptForTask = connectedCanvasPromptTextForSubmission(node);
         // 渲染时的 data-video-prompt-mode 可能因连接关系或输入框状态尚未同步而过期。
@@ -22507,8 +22504,11 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         const mode = autoParseNow ? 'auto-parse' : 'polish';
         button.disabled = true; button.classList.add('is-loading');
         const label = button.querySelector('span'); if(label) label.textContent = mode === 'auto-parse' ? '解析中…' : '润色中…';
+        input.value = '';
+        node.prompt = '';
+        input.dispatchEvent(new Event('input', {bubbles:true}));
         try {
-            const showProgress = task => renderCanvasPromptTaskProgress(input, original, task);
+            const showProgress = task => renderCanvasPromptTaskProgress(input, '', task);
             input.value = mode === 'auto-parse'
                 ? await autoParseCanvasVideoPrompt(node, refs, showProgress, currentPrompt)
                 : await polishCanvasVideoPrompt(node, [String(original || '').trim(), connectedPromptForTask].filter(Boolean).join('\n\n'), refs, showProgress);

@@ -559,11 +559,14 @@
         }
         return output;
     }
-    async function parseScene(node, options={}){
+    async function parseScene(node, options={}, onPromptCleared=null){
         if(node.type === 'film-video'){
             const source=resetVideoPromptTask(node,node.prompt);
+            const taskPrompt=effectivePrompt(node,options);
+            node.prompt='';
+            onPromptCleared?.();
             try {
-                node.prompt=await autoParseVideoPrompt(node,options.assets?.(node) || [],options);
+                node.prompt=await autoParseVideoPrompt(node,options.assets?.(node) || [],options,null,taskPrompt);
                 node.videoPromptTaskResult={source,result:node.prompt};
                 rememberExternalPromptSnapshot(node, options);
             } catch(error){ node.prompt=source; throw error; }
@@ -599,7 +602,7 @@
         rememberExternalPromptSnapshot(node, options);
         return node.prompt;
     }
-    async function autoParseVideoPrompt(node, assets=[], options={}, onProgress=null){
+    async function autoParseVideoPrompt(node, assets=[], options={}, onProgress=null, promptOverride=null){
         const refs = mapping(node, assets, options).refs.filter(item => item.url && (item.kind || 'image') === 'image').slice(0,20);
         const videos=assetList(node,assets).filter(item=>item.kind==='video').map(item=>item.url);
         if(!refs.length && !videos.length) throw new Error('自动解析至少需要图片或视频');
@@ -607,7 +610,7 @@
         const model = options.visionModel?.(node) || node.visionModel || '';
         const data = await submitFilmPromptTask('/api/canvas-video-auto-parse-tasks', {
             provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
-            prompt:effectivePrompt(node, options),
+            prompt:promptOverride===null ? effectivePrompt(node, options) : promptOverride,
             videos, images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
             web_search:node.promptWebSearch === true,
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
@@ -695,8 +698,6 @@
                 if(polishButton.disabled) return;
                 polishButton.disabled=true; polishButton.classList.add('is-loading');
                 const source=resetVideoPromptTask(node,prompt.value);
-                prompt.value=source;
-                prompt.dispatchEvent(new Event('input',{bubbles:true}));
                 // 连接关系和输入框可能在重绘间隙尚未反映到按钮 data 属性；
                 // 点击时再次判断，避免空提示词误走润色接口。
                 const currentPrompt=[String(source || '').trim(), externalPromptText(node, options)].filter(Boolean).join('\n\n');
@@ -710,23 +711,24 @@
                     && currentRefs.every(item=>['image','video'].includes(String(item?.kind || 'image').toLowerCase()));
                 const mode=autoParseNow ? 'auto-parse' : 'polish';
                 const label=polishButton.querySelector('span'); if(label) label.textContent=mode === 'auto-parse' ? '解析中…' : '润色中…';
+                prompt.value='';
+                node.prompt='';
+                prompt.dispatchEvent(new Event('input',{bubbles:true}));
                 try {
                     const showProgress=task=>{
                         const draft=String(task?.progress_text || '');
                         const status=String(task?.progress_status || '').trim();
-                        const original=String(prompt.dataset.taskOriginal || prompt.value || '');
-                        const next=draft || (status ? `${status}${original.trim() ? `\n\n${original}` : ''}` : original);
+                        const next=draft || status;
                         if(next && prompt.value!==next){ prompt.value=next; prompt.dispatchEvent(new Event('input',{bubbles:true})); }
                     };
-                    prompt.dataset.taskOriginal=source;
                     prompt.value=mode === 'auto-parse'
-                        ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[],showProgress) : autoParseVideoPrompt(node,options.assets?.(node)||[],options,showProgress))
+                        ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[],showProgress,currentPrompt) : autoParseVideoPrompt(node,options.assets?.(node)||[],options,showProgress,currentPrompt))
                         : await options.polishPrompt(node,taskPrompt,options.assets?.(node)||[],showProgress);
                     node.videoPromptTaskResult={source,result:prompt.value};
                     rememberExternalPromptSnapshot(node, options);
                     prompt.dispatchEvent(new Event('input',{bubbles:true}));
                 } catch(error){ prompt.value=source; prompt.dispatchEvent(new Event('input',{bubbles:true})); options.toast?.(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败')); }
-                finally { delete prompt.dataset.taskOriginal; polishButton.disabled=false; polishButton.classList.remove('is-loading'); syncAction(); }
+                finally { polishButton.disabled=false; polishButton.classList.remove('is-loading'); syncAction(); }
             });
         }
         root.querySelectorAll('[data-film-field]').forEach(control=>{
@@ -791,7 +793,9 @@
         root.querySelector('[data-film-action="parse"]')?.addEventListener('click',async event=>{
             event.preventDefault(); event.stopPropagation();
             const button=event.currentTarget; button.disabled=true;
-            try { await parseScene(node,options); notify(options,node,true); }
+            try { await parseScene(node,options,()=>{
+                if(prompt){ prompt.value=''; prompt.dispatchEvent(new Event('input',{bubbles:true})); }
+            }); notify(options,node,true); }
             catch(error){ node.runError=error.message || '视觉解析失败'; options.toast?.(node.runError); notify(options,node,true); }
             finally { button.disabled=false; }
         });

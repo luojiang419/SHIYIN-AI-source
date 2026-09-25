@@ -119,7 +119,7 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
     assert "prompt, images, image_labels:labels" in CANVAS
     assert "提示词解析必须看到 output/group 中连接的全部图片" in CANVAS
     assert "mediaRefsFromNode(source)" in CANVAS
-    assert "prompt:effectivePrompt(node, options)," in FILM
+    assert "prompt:promptOverride===null ? effectivePrompt(node, options) : promptOverride," in FILM
     assert "images:refs.map(item=>item.url)" in FILM
     assert "必须逐张检查并在最终提示词中实际使用本次收到的每一张图片" in MAIN
     assert "不能只使用第一张和最后一张" in MAIN
@@ -158,6 +158,9 @@ def test_repeated_video_prompt_task_clears_previous_result_before_new_request():
     assert "delete node.videoPromptLastResult" in FILM
     assert "node.videoPromptTaskResult={source,result:prompt.value}" in FILM
     assert "node.videoPromptTaskResult={source,result:node.prompt}" in FILM
+    assert "input.value = '';" in CANVAS
+    assert "prompt.value='';" in FILM
+    assert "const next=draft || status" in FILM
 
 
 def test_refilled_prompt_does_not_resubmit_unchanged_connected_prompt():

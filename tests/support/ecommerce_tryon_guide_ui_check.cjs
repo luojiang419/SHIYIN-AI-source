@@ -45,9 +45,19 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
             const cards = [...element.querySelectorAll(':scope > .ec-tryon-slot-card.is-model')];
             return {count:cards.length, maxRight:Math.max(...cards.map(card => card.getBoundingClientRect().right)), maxBottom:Math.max(...cards.map(card => card.getBoundingClientRect().bottom)), viewport:innerWidth, height:innerHeight};
         });
+        await page.screenshot({path:'.codex-tmp/ecommerce-tryon-multiple-models.png'});
         assert.equal(modelLayout.count,4,'三位模特和添加卡片应直接平铺在操作区');
         assert.ok(modelLayout.maxRight <= modelLayout.viewport, '模特卡片应完整显示在工作台内');
         assert.ok(modelLayout.maxBottom <= modelLayout.height, '添加模特卡片应和其他模特在首屏完整显示');
+        const flatStage = await page.locator('.ec-tryon-materials').evaluate(element => {
+            const work = element.getBoundingClientRect();
+            const intro = element.querySelector('.ec-tryon-step-intro').getBoundingClientRect();
+            const stage = element.querySelector('.ec-tryon-stage').getBoundingClientRect();
+            return {border:getComputedStyle(element).borderTopWidth,background:getComputedStyle(element).backgroundColor,introAbove:intro.bottom < stage.top,introLeft:intro.left < stage.left,centerDelta:Math.abs((stage.left + stage.right - work.left - work.right)/2)};
+        });
+        assert.equal(flatStage.border,'0px','操作区不应再有外层卡片边框');
+        assert.equal(flatStage.background,'rgba(0, 0, 0, 0)','操作区不应再有外层卡片底色');
+        assert.ok(flatStage.introAbove && flatStage.introLeft && flatStage.centerDelta < 12,'说明文字应在左上，卡片组应居中');
         assert.equal(await page.locator('[data-tryon-step-back]').count(),0);
         const firstArrow = await page.locator('.ec-tryon-materials').evaluate(element => {
             const card = element.querySelector('.ec-tryon-slot-card.is-model:last-child').getBoundingClientRect();
@@ -56,7 +66,6 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         });
         assert.ok(firstArrow.clear,'右侧箭头不应遮挡添加模特卡');
         assert.equal(firstArrow.round,'50%');
-        await page.screenshot({path:'.codex-tmp/ecommerce-tryon-multiple-models.png'});
         await page.locator('[data-tryon-model-remove="2"]').click();
         assert.equal(await page.locator('[data-tryon-model-index]').count(),2);
         assert.equal(await page.locator('[data-tryon-model-index="1"]').getAttribute('aria-pressed'),'true','删除其他模特时应保留当前选择');

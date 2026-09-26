@@ -1578,13 +1578,15 @@
             <div class="ec-tryon-stepbar">${stepHtml}</div>
             <div class="ec-tryon-materials">
                 <div class="ec-tryon-step-intro"><small>STEP ${step + 1} / 4</small><h3>${headlines[step][0]}</h3><p>${headlines[step][1]}</p></div>
-                <div class="ec-tryon-reference-grid ec-tryon-closet-grid" aria-label="${escapeHtml(t('ecommerce.tryOnWardrobe'))}">
-                    ${step === 0 ? modelCards + addModelCard : ''}
-                    ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') : ''}
-                    ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') : ''}
+                <div class="ec-tryon-stage">
+                    <div class="ec-tryon-reference-grid ec-tryon-closet-grid" aria-label="${escapeHtml(t('ecommerce.tryOnWardrobe'))}">
+                        ${step === 0 ? modelCards + addModelCard : ''}
+                        ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') : ''}
+                        ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') : ''}
+                    </div>
+                    ${step === 1 && canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
+                    ${step === 3 ? `<div class="ec-tryon-prompt-plan"><div><strong>自动提示词</strong><span>参考图 ${taskInputsForRequest().length} 张 · 可在下方补充生成需求</span></div><button type="button" data-tryon-plan-prompt>${prompt ? '重新规划' : '自动规划提示词'}</button><p data-tryon-plan-status>${prompt ? escapeHtml(prompt.message || '规划完成') : '点击后调用视觉分析 API，生成可审阅的最终提示词。'}</p><pre data-tryon-plan-result>${escapeHtml(prompt?.prompt_preview || '尚未规划。生成时系统仍会自动组合角色和服饰约束。')}</pre></div>` : ''}
                 </div>
-                ${step === 1 && canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
-                ${step === 3 ? `<div class="ec-tryon-prompt-plan"><div><strong>自动提示词</strong><span>参考图 ${taskInputsForRequest().length} 张 · 可在下方补充生成需求</span></div><button type="button" data-tryon-plan-prompt>${prompt ? '重新规划' : '自动规划提示词'}</button><p data-tryon-plan-status>${prompt ? escapeHtml(prompt.message || '规划完成') : '点击后调用视觉分析 API，生成可审阅的最终提示词。'}</p><pre data-tryon-plan-result>${escapeHtml(prompt?.prompt_preview || '尚未规划。生成时系统仍会自动组合角色和服饰约束。')}</pre></div>` : ''}
                 <div class="ec-tryon-step-actions" aria-label="步骤导航">
                     ${step > 0 ? '<button type="button" class="is-back" data-tryon-step-back aria-label="上一步" title="上一步"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5"/></svg></button>' : ''}
                     ${step < 3 ? `<button type="button" class="is-next" data-tryon-step-next aria-label="${step === 2 ? '前往提示词' : '下一步'}" title="${step === 2 ? '前往提示词' : '下一步'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg></button>` : ''}

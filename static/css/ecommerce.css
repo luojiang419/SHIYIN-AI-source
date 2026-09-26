@@ -1512,15 +1512,10 @@ html.studio-theme-dark body .ec-result-frame {
     min-height:0;
     display:grid;
     grid-template-columns:minmax(0,1fr);
-    align-content:start;
+    grid-template-rows:auto minmax(0,1fr);
+    align-content:stretch;
     gap:12px;
-    padding:22px;
-    border:1px solid color-mix(in srgb,var(--ec-border) 82%,transparent);
-    border-radius:26px;
-    background:
-        linear-gradient(135deg,color-mix(in srgb,var(--ec-panel-raised) 72%,transparent),color-mix(in srgb,var(--ec-panel-soft) 66%,transparent)),
-        var(--ec-panel);
-    box-shadow:var(--ec-tryon-shadow-soft);
+    padding:18px 20px;
 }
 .ec-tryon-reference-grid,
 .ec-tryon-closet-grid {
@@ -2441,7 +2436,8 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
 .ec-tryon-step-intro h3 { margin:7px 0 4px; color:var(--ec-text); font-size:20px; }
 .ec-tryon-step-intro p { margin:0; color:var(--ec-muted); font-size:12px; line-height:1.6; }
 .ec-page.is-try-on .ec-tryon-closet-grid:empty { display:none; }
-.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { display:flex; flex-wrap:wrap; justify-content:center; }
+.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid > .ec-tryon-slot-card { flex:0 0 186px; }
 .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,
 .ec-page.is-try-on[data-tryon-step="2"] .ec-tryon-closet-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .ec-tryon-step-actions { position:absolute; z-index:3; top:50%; left:10px; right:10px; display:flex; justify-content:space-between; align-items:center; height:50px; transform:translateY(-50%); pointer-events:none; }
@@ -2449,9 +2445,9 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
 .ec-page.is-try-on .ec-input-module,
 .ec-page.is-try-on .ec-input-slots,
 .ec-page.is-try-on .ec-tryon-studio { height:100%; min-height:0; }
-.ec-page.is-try-on .ec-tryon-materials { position:relative; align-self:safe center; width:100%; padding-inline:64px; }
-.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-materials { max-width:960px; justify-self:center; }
-.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { justify-content:center; }
+.ec-page.is-try-on .ec-tryon-materials { position:relative; align-self:stretch; width:100%; height:100%; }
+.ec-tryon-stage { grid-row:2; min-width:0; width:calc(100% - 96px); max-width:900px; display:grid; gap:12px; align-self:safe center; justify-self:center; }
+.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-stage { width:calc(100% - 64px); max-width:960px; }
 .ec-tryon-model-photo { position:relative; min-height:0; overflow:hidden; border:1px solid var(--ec-border-strong); border-radius:20px; background:var(--ec-panel); box-shadow:var(--ec-tryon-shadow-card); }
 .ec-tryon-slot-card.is-model.is-active .ec-tryon-model-photo { border-color:var(--ec-accent); box-shadow:var(--ec-tryon-shadow-card),0 0 0 2px color-mix(in srgb,var(--ec-accent) 28%,transparent); }
 .ec-tryon-model-select { width:100%; height:100%; padding:0; border:0; background:transparent; cursor:pointer; }
@@ -2465,10 +2461,7 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
 .ec-tryon-add-model-tile strong { font-size:12px; }
 .ec-tryon-add-model-tile small { color:var(--ec-muted); font-size:10px; }
 .ec-page.is-try-on .ec-tryon-add-model-tile:hover { border-color:var(--ec-accent); }
-@media (max-width:1280px) {
-    .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-}
-.ec-page.is-try-on[data-tryon-step="3"] .ec-tryon-materials { max-width:780px; justify-self:center; }
+.ec-page.is-try-on[data-tryon-step="3"] .ec-tryon-stage { max-width:780px; }
 @media (min-width:1101px) {
     .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid { grid-template-columns:repeat(6,minmax(0,1fr)); }
     .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid > .ec-tryon-slot-card { grid-column:span 2; }
@@ -2515,6 +2508,8 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
 }
 @media (max-width:560px) {
     .ec-page.is-try-on .ec-tryon-materials { padding-inline:16px; padding-bottom:76px; }
+    .ec-tryon-stage { width:100%; }
+    .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid > .ec-tryon-slot-card { flex-basis:min(100%,280px); }
     .ec-tryon-step-actions { top:auto; bottom:12px; transform:none; }
     .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid,
     .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,

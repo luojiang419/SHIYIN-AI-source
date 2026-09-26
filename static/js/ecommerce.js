@@ -1435,7 +1435,7 @@
 
     function tryOnDescriptionRow(role, item=state.inputs[role] || {}, modelIndex=''){
         const attr = modelIndex === '' ? `data-tryon-description-role="${escapeHtml(role)}"` : `data-tryon-model-description="${modelIndex}"`;
-        return `<button type="button" class="ec-tryon-description" ${attr} title="双击编辑描述" aria-label="双击编辑参考描述"><span>${escapeHtml(String(item.instruction || '').trim() || '双击添加描述，供 AI 助手读取')}</span></button>`;
+        return `<input type="text" class="ec-tryon-description" ${attr} value="${escapeHtml(String(item.instruction || '').trim())}" placeholder="点击填写描述，供 AI 助手读取" aria-label="参考图描述" maxlength="300">`;
     }
 
     function tryOnAddCardHtml(step, number){
@@ -1448,8 +1448,7 @@
         const kickerLabel = tryOnSlotKickerLabel(input, item.stageKey);
         return `<div class="ec-tryon-slot-card is-outfit" data-tryon-wardrobe-role="${escapeHtml(item.role)}" data-tryon-sort-role="${escapeHtml(item.role)}">
             <div class="ec-tryon-card-kicker"><b>${escapeHtml(item.number)}</b><span>${escapeHtml(kickerLabel)}</span>${item.extra ? `<button type="button" class="ec-tryon-remove-slot" data-remove-tryon-extra="${escapeHtml(item.role)}" title="删除此卡片" aria-label="删除此卡片">×</button>` : `<button type="button" class="ec-tryon-drag-handle" draggable="true" data-tryon-drag-handle="${escapeHtml(item.role)}" title="${escapeHtml(t('ecommerce.dragReorder'))}" aria-label="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</button>`}</div>
-            ${inputSlotHtml(input)}
-            ${tryOnReferenceTypeRow(item.role)}
+            <div class="ec-tryon-media-card">${inputSlotHtml(input)}${tryOnReferenceTypeRow(item.role)}</div>
             ${item.extra && tryOnRequestRoleForSlot(item.role, state.inputs[item.role]) === 'detail' ? tryOnFabricDetailTargetHtml(item.role) : ''}
             ${tryOnDescriptionRow(item.role)}
         </div>`;
@@ -1467,7 +1466,7 @@
 
     function tryOnFabricDetailCard(){
         const input = tryOnInputConfig('detail') || {role:'detail', labelKey:'ecommerce.refDetail', required:false};
-        return `<div class="ec-tryon-slot-card is-fabric-detail"><div class="ec-tryon-card-kicker"><b>纹理</b><span>面料细节（可选）</span></div>${inputSlotHtml(input)}${tryOnReferenceTypeRow('detail')}${tryOnRequestRoleForSlot('detail',state.inputs.detail) === 'detail' ? tryOnFabricDetailTargetHtml() : ''}${tryOnDescriptionRow('detail')}</div>`;
+        return `<div class="ec-tryon-slot-card is-fabric-detail"><div class="ec-tryon-card-kicker"><b>纹理</b><span>面料细节（可选）</span></div><div class="ec-tryon-media-card">${inputSlotHtml(input)}${tryOnReferenceTypeRow('detail')}</div>${tryOnRequestRoleForSlot('detail',state.inputs.detail) === 'detail' ? tryOnFabricDetailTargetHtml() : ''}${tryOnDescriptionRow('detail')}</div>`;
     }
 
     function tryOnReorderedPreviewOrder(draggedRole, targetRole){
@@ -1614,17 +1613,15 @@
         const modelTypeRow = (item,index) => `<label class="ec-reference-type-row ec-tryon-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected:selectedSlotTypeId(item,'source'), context:'try_on', fallbackRole:'source', item, dataAttr:'data-tryon-model-type', dataValue:String(index)})}</label>`;
         const modelCards = modelCandidates.map((candidate, index) => `<div class="ec-tryon-slot-card is-model ${index === selectedModelIndex ? 'is-active' : ''}">
             <div class="ec-tryon-card-kicker"><b>${String(index + 1).padStart(2,'0')}</b><span>模特 ${index + 1}${index === selectedModelIndex ? ' · 当前' : ''}</span></div>
-            <div class="ec-tryon-model-photo">
-                <button type="button" class="ec-tryon-model-select" data-tryon-model-index="${index}" aria-pressed="${index === selectedModelIndex}" aria-label="选择模特 ${index + 1}" ${candidate.url ? '' : 'disabled'}><img src="${escapeHtml(referenceDisplayUrl(candidate))}" alt="模特 ${index + 1}"></button>
-                <div class="ec-tryon-model-tools"><button type="button" data-tryon-model-preview="${index}" ${candidate.url ? '' : 'disabled'}>查看</button><button type="button" data-tryon-model-remove="${index}">删除</button></div>
+            <div class="ec-tryon-media-card">
+                <div class="ec-tryon-model-photo"><button type="button" class="ec-tryon-model-select" data-tryon-model-index="${index}" aria-pressed="${index === selectedModelIndex}" aria-label="选择模特 ${index + 1}" ${candidate.url ? '' : 'disabled'}><img src="${escapeHtml(referenceDisplayUrl(candidate))}" alt="模特 ${index + 1}"></button><div class="ec-tryon-model-tools"><button type="button" data-tryon-model-preview="${index}" ${candidate.url ? '' : 'disabled'}>查看</button><button type="button" data-tryon-model-remove="${index}">删除</button></div></div>
+                ${modelTypeRow(candidate,index)}
             </div>
-            ${modelTypeRow(candidate,index)}
             ${tryOnDescriptionRow('source',candidate,index)}
         </div>`).join('');
         const emptyModelCards = pendingModelCards.map((pendingModel,offset) => `<div class="ec-tryon-slot-card is-model is-empty-model">
             <div class="ec-tryon-card-kicker"><b>${String(modelCandidates.length + offset + 1).padStart(2,'0')}</b><span>选择模特图片</span>${modelCandidates.length || pendingModelCards.length > 1 ? `<button type="button" class="ec-tryon-remove-slot" data-remove-pending-model="${offset}" title="删除空卡片" aria-label="删除空卡片">×</button>` : ''}</div>
-            <article class="ec-upload-slot" data-role="source" data-tryon-model-empty-index="${offset}"><div class="ec-upload-empty" data-action="upload" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg><small>${escapeHtml(t('ecommerce.dropOrChoose'))}</small></div></article>
-            ${modelTypeRow(pendingModel,`empty_${offset}`)}
+            <div class="ec-tryon-media-card"><article class="ec-upload-slot" data-role="source" data-tryon-model-empty-index="${offset}"><div class="ec-upload-empty" data-action="upload" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg><small>${escapeHtml(t('ecommerce.dropOrChoose'))}</small></div></article>${modelTypeRow(pendingModel,`empty_${offset}`)}</div>
             ${tryOnDescriptionRow('source',pendingModel,`empty_${offset}`)}
         </div>`).join('');
         const addModelCard = `<div class="ec-tryon-slot-card is-add-reference is-add-model">
@@ -1705,8 +1702,26 @@
                 persistSettings();
             });
         });
-        el.inputSlots.querySelectorAll('[data-tryon-description-role],[data-tryon-model-description]').forEach(button => {
-            button.addEventListener('dblclick', () => beginTryOnDescriptionEdit(button));
+        el.inputSlots.querySelectorAll('[data-tryon-description-role],[data-tryon-model-description]').forEach(input => {
+            const update = () => {
+                const modelKey = input.dataset.tryonModelDescription;
+                const instruction = input.value.trim().slice(0,300);
+                if(modelKey?.startsWith('empty_')) {
+                    const pending = tryOnPendingModelCards()[Number(modelKey.slice(6))];
+                    if(pending) pending.instruction = instruction;
+                } else if(modelKey !== undefined) updateTryOnModelMetadata(Number(modelKey),{instruction});
+                else {
+                    const role = input.dataset.tryonDescriptionRole || '';
+                    state.inputs[role] ||= {role,reference_type:role,reference_id:role};
+                    state.inputs[role].instruction = instruction;
+                }
+                state.tryOnPromptPreview = null;
+            };
+            let composing = false;
+            input.addEventListener('compositionstart', () => { composing = true; });
+            input.addEventListener('compositionend', () => { composing = false; update(); });
+            input.addEventListener('input', () => { if(!composing) update(); });
+            input.addEventListener('blur', () => persistSettings());
         });
         el.inputSlots.querySelectorAll('[data-tryon-model-index]').forEach(button => button.addEventListener('click', () => selectTryOnReference('source', Number(button.dataset.tryonModelIndex))));
         el.inputSlots.querySelectorAll('[data-tryon-model-preview]').forEach(button => button.addEventListener('click', () => {
@@ -1759,48 +1774,6 @@
         delete options.model_pending_type;
         delete options.model_pending_instruction;
         return cards;
-    }
-
-    function beginTryOnDescriptionEdit(button){
-        if(button.classList.contains('is-editing')) return;
-        const modelKey = button.dataset.tryonModelDescription;
-        const role = button.dataset.tryonDescriptionRole || '';
-        const pending = modelKey?.startsWith('empty_');
-        const modelIndex = modelKey === undefined || pending ? -1 : Number(modelKey);
-        const pendingIndex = pending ? Number(modelKey.slice(6)) : -1;
-        const current = pending ? tryOnPendingModelCards()[pendingIndex]?.instruction : modelIndex >= 0 ? tryOnReferenceCandidates(state.inputs.source)[modelIndex]?.instruction : state.inputs[role]?.instruction;
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.maxLength = 300;
-        input.value = String(current || '');
-        input.setAttribute('aria-label','参考图描述');
-        button.classList.add('is-editing');
-        button.appendChild(input);
-        let done = false;
-        const finish = commit => {
-            if(done) return;
-            done = true;
-            if(commit){
-                const instruction = input.value.trim().slice(0,300);
-                if(pending && tryOnPendingModelCards()[pendingIndex]) tryOnPendingModelCards()[pendingIndex].instruction = instruction;
-                else if(modelIndex >= 0) updateTryOnModelMetadata(modelIndex,{instruction});
-                else {
-                    state.inputs[role] ||= {role,reference_type:role,reference_id:role};
-                    state.inputs[role].instruction = instruction;
-                }
-                state.tryOnPromptPreview = null;
-                persistSettings();
-            }
-            renderInputs();
-        };
-        input.addEventListener('click', event => event.stopPropagation());
-        input.addEventListener('keydown', event => {
-            if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
-            if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
-        });
-        input.addEventListener('blur', () => finish(true));
-        input.focus();
-        input.select();
     }
 
     function setTryOnStep(next){

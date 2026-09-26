@@ -14,7 +14,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
             await page.locator('#preview').evaluate(image => image.decode());
             const metrics = await page.evaluate(() => {
                 const frame = document.querySelector('.preview-scroll');
-                const controls = document.querySelector('.controls').getBoundingClientRect();
+                const footer = document.querySelector('footer').getBoundingClientRect();
                 const caption = document.querySelector('figcaption').getBoundingClientRect();
                 return {
                     documentHeight:document.documentElement.scrollHeight,
@@ -23,13 +23,15 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
                     viewportWidth:innerWidth,
                     frameClientHeight:frame.clientHeight,
                     frameScrollHeight:frame.scrollHeight,
-                    controlsBottom:controls.bottom,
+                    footerBottom:footer.bottom,
                     captionBottom:caption.bottom,
+                    redundantButtons:document.querySelectorAll('#previous,#next,.controls').length,
                 };
             });
             assert.ok(metrics.documentHeight <= metrics.viewportHeight + 1,`${viewport.width}px 外层页面不应竖向滚动：${JSON.stringify(metrics)}`);
             assert.ok(metrics.documentWidth <= metrics.viewportWidth + 1,`${viewport.width}px 外层页面不应横向滚动`);
-            assert.ok(metrics.controlsBottom <= viewport.height && metrics.captionBottom <= viewport.height,`${viewport.width}px 导航与说明应固定在视口内`);
+            assert.equal(metrics.redundantButtons,0,'演示页底部不应出现重复的上一步/下一步按钮');
+            assert.ok(metrics.footerBottom <= viewport.height && metrics.captionBottom <= viewport.height,`${viewport.width}px 说明应固定在视口内`);
             if(viewport.width >= 1280) {
                 assert.ok(metrics.frameScrollHeight > metrics.frameClientHeight,`${viewport.width}px 截图应只在框架内滚动`);
                 await page.locator('#previewScroll').evaluate(frame => {frame.scrollTop = frame.scrollHeight;});

@@ -99,7 +99,7 @@
 
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:'', generation_style:'standard_product'},
-        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, extra_slots:[], next_extra_slot_id:1, model_pending_cards:[], next_model_pending_id:1, studio_reference:'', guide_step:0, guide_task_id:''},
+        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, extra_slots:[], next_extra_slot_id:1, model_pending_cards:[], next_model_pending_id:1, studio_reference:'', guide_step:0, guide_task_id:'', guide_style:'editorial_model'},
         batch_outfit:{},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
     };
@@ -149,7 +149,7 @@
         referencePreview:{key:'', versions:[], selectedIndex:0, mode:'preview', ratio:'free', cropRect:{x:.05,y:.05,w:.9,h:.9}, drag:null},
         tryOnSwitches:{},
         tryOnPromptPreview:null,
-        tryOnGuide:{task:null, submitting:false, error:'', timer:null},
+        tryOnGuide:{task:null, submitting:false, error:'', timer:null, view:'guide'},
         compareViewer:null,
         viewportWidth:window.innerWidth,
         settingsNeedsMigration:false,
@@ -1924,39 +1924,78 @@
     function syncTryOnGuidePanel(){
         const resultPanel = el.emptyResult?.closest('.ec-result-panel');
         if(!resultPanel) return;
+        const resultBody = resultPanel.querySelector('.ec-result-body');
+        const resultHead = resultPanel.querySelector('.ec-result-head');
         let panel = byId('tryOnGuidePanel');
-        if(state.operation !== 'try_on') { panel?.remove(); return; }
+        let switcher = byId('tryOnResultSwitcher');
+        let status = byId('tryOnGuideStatus');
+        if(state.operation !== 'try_on') {
+            panel?.remove();
+            switcher?.remove();
+            status?.remove();
+            resultPanel.classList.remove('is-showing-guide');
+            return;
+        }
         if(!panel) {
             panel = document.createElement('section');
             panel.id = 'tryOnGuidePanel';
             panel.className = 'ec-tryon-guide-panel';
-            resultPanel.appendChild(panel);
+            resultBody.appendChild(panel);
         }
         const guide = state.tryOnGuide;
         const task = guide.task;
         const image = task?.result?.images?.[0] || '';
         const running = guide.submitting || ['queued','running'].includes(task?.status);
-        panel.innerHTML = `<div class="ec-tryon-guide-head"><div><small>OUTFIT CARD</small><h3>模特搭配卡</h3><p>点击底部“开始生成”后，与最终换衣图一起生成。</p></div></div>
-            ${image ? `<div class="ec-tryon-guide-result"><img src="${escapeHtml(image)}" alt="AI 生成的模特搭配卡"><div><span>搭配卡已完成</span><label>选择导出 <select data-tryon-guide-format><option value="png">PNG 图片</option><option value="jpeg">JPG 图片</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div></div>` : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guide.error || (running ? '正在生成模特搭配卡…' : '等待开始生成。'))}</p>`}`;
+        if(!image && (running || guide.error)) {
+            if(!status) {
+                status = document.createElement('span');
+                status.id = 'tryOnGuideStatus';
+                status.className = 'ec-tryon-guide-status';
+                status.setAttribute('role','status');
+                resultHead.insertBefore(status, el.compareReset);
+            }
+            status.textContent = guide.error || '搭配卡生成中…';
+        } else status?.remove();
+        const showingGuide = Boolean(image && guide.view !== 'tryon');
+        resultPanel.classList.toggle('is-showing-guide', showingGuide);
+        if(image && !switcher) {
+            switcher = document.createElement('div');
+            switcher.id = 'tryOnResultSwitcher';
+            switcher.className = 'ec-tryon-result-switcher';
+            resultHead.insertBefore(switcher, el.compareReset);
+        }
+        if(!image) switcher?.remove();
+        else {
+            switcher.innerHTML = `<button type="button" data-tryon-result-view="guide" aria-pressed="${showingGuide}">搭配卡</button><button type="button" data-tryon-result-view="tryon" aria-pressed="${!showingGuide}">换衣结果</button>`;
+            switcher.querySelectorAll('[data-tryon-result-view]').forEach(button => button.addEventListener('click', () => {
+                guide.view = button.dataset.tryonResultView;
+                syncTryOnGuidePanel();
+            }));
+        }
+        panel.innerHTML = image ? `<div class="ec-tryon-guide-head"><div><small>OUTFIT CARD</small><h3>模特搭配卡</h3></div><label>导出格式 <select data-tryon-guide-format><option value="png">PNG</option><option value="jpeg">JPG</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div><div class="ec-tryon-guide-result"><img src="${escapeHtml(image)}" alt="AI 生成的模特搭配卡"></div>`
+            : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guide.error || (running ? '正在生成模特搭配卡…' : '等待开始生成。'))}</p>`;
         panel.querySelector('[data-export-tryon-guide]')?.addEventListener('click', exportTryOnGuide);
         if(!task && currentOptions().guide_task_id && !guide.loading) void pollTryOnGuide();
     }
 
-    async function generateTryOnGuide(){
+    async function generateTryOnGuide(style){
         if(!tryOnReady() || state.tryOnGuide.submitting) return;
         const guide = state.tryOnGuide;
         guide.submitting = true;
         guide.error = '';
         syncTryOnGuidePanel();
         const references = taskInputsForRequest().map(item => ({...item,
-            role:item.role === 'source' ? 'model_identity' : item.role,
-            reference_type:item.role === 'source' ? 'model_identity' : item.role,
+            role:item.role === 'source' ? 'subject' : item.role,
+            reference_type:item.role === 'source' ? 'subject' : item.role,
         }));
         const referenceMap = references.map((item,index) => `Image ${index + 1}: ${item.role} (${item.label || item.name || 'reference'})`).join('; ');
         const requirement = String(currentOptions().instruction || '').trim();
-        const prompt = `Create ONE clean portrait-format model outfit composition card for this exact virtual try-on task. Reference order: ${referenceMap}. Place the selected model as a full-length figure on the left and arrange the exact supplied garments, shoes and accessories as separate, clearly visible cutout items beside her on the right. The model may wear the complete outfit, but each referenced clothing item must also be recognizable beside her. An alternative composition is an elegant human silhouette formed entirely from the supplied clothing pieces. Use one coherent composition, not a before/after image. Preserve the model's identity and the referenced garments' shapes, colors, fabrics, logos and details. Pose and fabric references guide only their assigned purpose. Minimal neutral background, balanced spacing, no invented items, no UI, no watermark. ${requirement ? `Additional user requirement: ${requirement}` : ''}`;
+        const direction = style === 'editorial_silhouette'
+            ? 'STYLE A — FASHION SILHOUETTE: In the large center column, arrange the supplied garments into an elegant full-body dressed human silhouette with no visible real person, face, skin, or mannequin head. The subject reference informs only fit and proportions. Show each supplied clothing piece separately in a narrow numbered left column; show the supplied bag, shoes, jewelry and other accessories as isolated objects in a narrow right column.'
+            : 'STYLE B — REAL MODEL EDITORIAL: In the large center column, show the selected reference model as the same recognizable full-length person wearing the supplied outfit, preserving face, body and hair. Show each supplied clothing piece separately in a narrow numbered left column; show the supplied bag, shoes, jewelry and other accessories as isolated objects in a narrow right column.';
+        const prompt = `Create ONE finished vertical luxury fashion editorial outfit board, visually following the selected reference layout. Reference order: ${referenceMap}. ${direction} Use an ivory and warm beige studio background, refined dark-brown serif headline at upper left, small editorial section heading at upper right, elegant fine dividers, restrained numbered item captions, generous negative space, and a small palette / material strip at the bottom. The center figure is dominant; the left and right item columns are clearly separated and never overlap it. Keep all readable words short and relevant to the supplied items; do not invent brand names or specific products. Preserve every referenced garment's shape, color, fabric and details. Pose and fabric references guide only their assigned purpose. Do not add unreferenced clothes or accessories. Produce a single complete poster, not a UI screenshot, collage of unrelated photos, or before/after comparison. ${requirement ? `Additional user requirement: ${requirement}` : ''}`;
         try {
-            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:state.providerId, model:state.model, aspect_ratio:'3:4', resolution:state.resolution === 'auto' ? '2k' : state.resolution, quality:state.quality, count:1, parent_task_id:''};
+            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:state.providerId, model:state.model, aspect_ratio:'4:5', resolution:state.resolution === 'auto' ? '2k' : state.resolution, quality:state.quality, count:1, parent_task_id:''};
             const task = await fetchJson('/api/ecommerce/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
             guide.task = task;
             currentOptions().guide_task_id = taskIdOf(task);
@@ -2555,6 +2594,31 @@
             renderInputs();
             validateForm(false);
             el.operationControls.querySelector('[data-open-generation-style]')?.focus();
+        }));
+        dialog.showModal();
+    }
+
+    function openTryOnGuideStyleDialog(){
+        if(state.submissionsInFlight || !validateForm(true)) return;
+        const dialog = document.createElement('dialog');
+        dialog.className = 'ec-tryon-style-dialog';
+        dialog.setAttribute('aria-labelledby','tryOnStyleTitle');
+        const selected = currentOptions().guide_style || 'editorial_model';
+        const styles = [
+            ['editorial_silhouette','服装人形陈列','服装组成无真人造型，左右陈列单品','/static/images/tryon-style-silhouette.jpg'],
+            ['editorial_model','真人模特画报','真人模特穿搭居中，左右陈列单品','/static/images/tryon-style-model.jpg'],
+        ];
+        dialog.innerHTML = `<header><div><small>OUTFIT CARD STYLE</small><h2 id="tryOnStyleTitle">选择搭配卡样式</h2><p>会同时生成最终换衣图和搭配卡</p></div><button type="button" data-close-tryon-style aria-label="关闭">×</button></header><div class="ec-tryon-style-grid">${styles.map(([id,title,hint,src]) => `<button type="button" data-tryon-guide-style="${id}" aria-pressed="${selected === id}"><img src="${src}" alt="${title}样式示例"><strong>${title}</strong><span>${hint}</span></button>`).join('')}</div>`;
+        document.body.appendChild(dialog);
+        dialog.addEventListener('close', () => { dialog.remove(); el.generateButton.focus(); }, {once:true});
+        dialog.querySelector('[data-close-tryon-style]').addEventListener('click', () => dialog.close());
+        dialog.addEventListener('click', event => { if(event.target === dialog) dialog.close(); });
+        dialog.querySelectorAll('[data-tryon-guide-style]').forEach(button => button.addEventListener('click', () => {
+            const style = button.dataset.tryonGuideStyle;
+            currentOptions().guide_style = style;
+            persistSettings();
+            dialog.close();
+            void createTask('',style);
         }));
         dialog.showModal();
     }
@@ -3904,6 +3968,7 @@
         requestAnimationFrame(syncCompareGeometry);
         renderCandidateRail();
         sessionStorage.setItem(CURRENT_TASK_KEY, taskIdOf(task));
+        if(state.operation === 'try_on') syncTryOnGuidePanel();
     }
 
     function candidateRailItems(){
@@ -4035,7 +4100,7 @@
         el.resultMeta.innerHTML = items.join('');
     }
 
-    async function createTask(parentTaskId=''){
+    async function createTask(parentTaskId='', guideStyle=''){
         if(state.submissionsInFlight) return;
         if(!validateForm(true)) return;
         clearFormError();
@@ -4069,8 +4134,9 @@
             if(state.operation === 'try_on' && !parentTaskId) {
                 clearTimeout(state.tryOnGuide.timer);
                 state.tryOnGuide.task = null;
+                state.tryOnGuide.view = 'guide';
                 currentOptions().guide_task_id = '';
-                await generateTryOnGuide();
+                await generateTryOnGuide(guideStyle || currentOptions().guide_style || 'editorial_model');
             }
         } catch(error) {
             if(isCompatibleModelError(error.message)) {
@@ -4619,7 +4685,7 @@
             updateModelPanelSelection();
             persistSettings();
         });
-        el.generateButton.addEventListener('click', () => createTask());
+        el.generateButton.addEventListener('click', () => state.operation === 'try_on' ? openTryOnGuideStyleDialog() : createTask());
         document.addEventListener('keydown', handleResultNavigationKeydown);
         el.candidateList?.addEventListener('click', event => {
             const moreButton = event.target.closest('[data-candidate-more]');

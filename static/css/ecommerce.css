@@ -2558,6 +2558,39 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
 .ec-tryon-guide-result > div { display:flex; flex-wrap:wrap; gap:7px; align-items:center; color:var(--ec-text); font-size:10px; }
 .ec-tryon-guide-result label { display:flex; align-items:center; gap:5px; }
 .ec-tryon-guide-result select { max-width:105px; padding:6px; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-control); color:var(--ec-text); }
+.ec-page.is-try-on .ec-result-panel { grid-template-rows:auto minmax(0,1fr); overflow:hidden; }
+.ec-page.is-try-on .ec-result-body { min-height:0; }
+.ec-page.is-try-on .ec-result-panel:not(.is-showing-guide) .ec-tryon-guide-panel { display:none; }
+.ec-page.is-try-on .ec-result-panel.is-showing-guide #emptyResult,
+.ec-page.is-try-on .ec-result-panel.is-showing-guide #resultWorkspace { display:none !important; }
+.ec-page.is-try-on .ec-result-panel.is-showing-guide .ec-result-body { display:grid; }
+.ec-page.is-try-on .ec-result-panel.is-showing-guide .ec-tryon-guide-panel { min-height:0; height:100%; margin:0; padding:12px; grid-template-rows:auto minmax(0,1fr); }
+.ec-tryon-guide-panel .ec-tryon-guide-head { flex-wrap:wrap; }
+.ec-tryon-guide-panel .ec-tryon-guide-head label { display:flex; align-items:center; gap:5px; margin-left:auto; color:var(--ec-muted); font-size:10px; }
+.ec-tryon-guide-panel .ec-tryon-guide-head select { padding:6px; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-control); color:var(--ec-text); }
+.ec-tryon-guide-panel .ec-tryon-guide-head button { padding:7px 10px; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-text); color:var(--ec-panel); cursor:pointer; }
+.ec-page.is-try-on .ec-tryon-guide-result { min-height:0; display:grid; grid-template-columns:minmax(0,1fr); place-items:center; overflow:hidden; }
+.ec-page.is-try-on .ec-tryon-guide-result img { width:100%; height:100%; max-height:100%; object-fit:contain; border-radius:10px; cursor:default; }
+.ec-tryon-result-switcher { display:flex; gap:3px; margin-left:auto; padding:3px; border:1px solid var(--ec-border); border-radius:10px; background:var(--ec-result-soft-bg); }
+.ec-tryon-result-switcher button { padding:6px 9px; border:0; border-radius:7px; background:transparent; color:var(--ec-muted); font-size:10px; cursor:pointer; white-space:nowrap; }
+.ec-tryon-result-switcher button[aria-pressed="true"] { background:var(--ec-text); color:var(--ec-panel); }
+.ec-tryon-guide-status { margin-left:auto; color:var(--ec-muted); font-size:10px; }
+.ec-page.is-try-on .ec-result-head #compareReset { display:none; }
+.ec-page.is-try-on .ec-result-panel:not(.is-showing-guide) .ec-result-head #compareReset { display:inline-flex; }
+.ec-tryon-style-dialog { width:min(760px,calc(100vw - 28px)); max-height:calc(100vh - 30px); overflow:auto; padding:24px; border:1px solid var(--ec-border); border-radius:22px; background:var(--ec-panel); color:var(--ec-text); box-shadow:0 28px 80px #0005; }
+.ec-tryon-style-dialog::backdrop { background:#17171499; backdrop-filter:blur(5px); }
+.ec-tryon-style-dialog header { display:flex; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.ec-tryon-style-dialog header small { color:var(--ec-muted); font-size:10px; font-weight:800; letter-spacing:.18em; }
+.ec-tryon-style-dialog header h2 { margin:5px 0; font-size:22px; }
+.ec-tryon-style-dialog header p { margin:0; color:var(--ec-muted); font-size:12px; }
+.ec-tryon-style-dialog [data-close-tryon-style] { width:34px; height:34px; flex:none; border:1px solid var(--ec-border); border-radius:50%; background:var(--ec-control); color:var(--ec-text); font-size:22px; cursor:pointer; }
+.ec-tryon-style-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.ec-tryon-style-grid button { display:grid; gap:8px; padding:10px; border:2px solid var(--ec-border); border-radius:16px; background:var(--ec-result-soft-bg); color:var(--ec-text); text-align:left; cursor:pointer; }
+.ec-tryon-style-grid button:hover,.ec-tryon-style-grid button:focus-visible,.ec-tryon-style-grid button[aria-pressed="true"] { border-color:var(--ec-text); outline:0; }
+.ec-tryon-style-grid img { display:block; width:100%; height:min(38vh,315px); object-fit:contain; border-radius:10px; background:#e8dfd2; }
+.ec-tryon-style-grid strong { font-size:14px; }
+.ec-tryon-style-grid span { color:var(--ec-muted); font-size:11px; }
+@media (max-width:560px) { .ec-tryon-style-grid { grid-template-columns:1fr; } .ec-tryon-style-grid img { height:180px; } }
 @media (max-width:860px) {
     .ec-tryon-generation-references { grid-template-columns:minmax(220px,290px) minmax(0,1fr); }
     .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,

@@ -83,7 +83,11 @@ def garment_mask(base, color, foreground):
             return None
         return (labels == index).astype('uint8')*255
     person = cv2.resize(foreground, (w, h), interpolation=cv2.INTER_LINEAR) > 12
-    counts = np.sum((candidate > 0) & person, axis=1).astype('float32')
+    chroma_delta = np.abs(lab[:, :, 1:] - color[1:])
+    same_fabric_chroma = (chroma_delta[:, :, 0] < 18) & (chroma_delta[:, :, 1] < 38)
+    # 以同色度的完整洗水范围确定衣片纵向位置；深色种子仍负责连通轮廓。
+    # 否则浅色大腿与深色裤脚会被拆成两段，只增强脚口附近。
+    counts = np.sum(same_fabric_chroma & (lab[:, :, 0] < 220) & person, axis=1).astype('float32')
     counts = cv2.blur(counts[:, None], (1, max(15, h//80)))[:, 0]
     n, _, stats, _ = cv2.connectedComponentsWithStats((counts > w*.11).astype('uint8')[:, None], 8)
     if n < 2:
@@ -117,7 +121,10 @@ def garment_mask(base, color, foreground):
     cv2.drawContours(filled, contours, -1, 255, -1)
     if np.count_nonzero(mask)/max(1, np.count_nonzero(filled)) < .7:
         return None
-    filled[(distance > 30) | (lab[:, :, 0] > color[0]+35) | (rough == 0)] = 0
+    # 参考布面往往取自深色区域，同一条牛仔裤的大腿洗水可能亮很多。
+    # 已由连通裤片、人物深度和轮廓圈定的内部，按色度排除皮肤和鞋，
+    # 不再以深色样本的亮度上限裁掉大半条浅洗水裤腿。
+    filled[(~same_fabric_chroma) | (lab[:, :, 0] > 220) | (rough == 0)] = 0
     return filled
 
 

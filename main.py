@@ -11788,10 +11788,11 @@ def gemini_reference_part(ref):
     label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
     is_depth_map = role == "control_map" and "深度" in label
     is_garment_reference = role in {"target_image", "fabric_detail", "garment", "upper_garment", "lower_garment", "full_garment", "detail", "subject", "model_subject", "model_identity"} or (ref or {}).get("reference_id") == "universal_pose_anchor"
+    is_pose_transfer_source = (role == "source" and (ref or {}).get("garment_design_owner") is True) or role in {"source_view_1", "source_view_2"}
     pose_pair = role in {"pose_reference", "pose", "control_map"}
     value = reference_to_data_url(
         ref,
-        max_size=None if is_garment_reference else (2048 if pose_pair else 1536),
+        max_size=None if is_garment_reference else (3072 if is_pose_transfer_source else 2048 if pose_pair else 1536),
         # 身份、服装和两阶段编辑底图保留原尺寸，防止细节证据被下采样。
         lossless=is_depth_map or is_garment_reference,
     )
@@ -11820,6 +11821,8 @@ GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "full_garment": "仅提供整套服装商品本身，不提供穿着者身份、动作或背景。",
     "detail": "只提供绑定商品对应部位的面料与局部结构。依据可见部位判断前后左右，后袋、后腰调节扣和背面皮牌不得移植到正面。",
     "pose": "只提供动作与空间结构，不提供人物身份、衣服或背景。",
+    "source_view_1": "这是与主图同一款服装的第一个补充视角，只提供主图未展示的真实侧面或背面结构、拼缝走向、口袋位置和裤脚外扩。不能提供最终人物姿势、身份、构图或背景，不能把不可见的背面细节画到正面。",
+    "source_view_2": "这是与主图同一款服装的第二个补充视角，只补足主图和上一视角仍未展示的真实结构。按最终机位显示对应物理侧面，不镜像、不复制重复拼缝；不改变主图确定的正面设计或动作图确定的姿势。",
 }
 
 
@@ -11833,7 +11836,9 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
     except (TypeError, ValueError):
         index = max(1, int(fallback_index))
     contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
-    if (ref or {}).get("reference_id") == "universal_pose_anchor":
+    if role == "source" and (ref or {}).get("garment_design_owner") is True:
+        contract = "这是动作迁移的最终人物和完整服装原型。裤型、膝下到脚口的宽度变化、斜向拼缝、洗水、牛仔织纹和鞋均以此图为准；动作图只提供姿态与构图，不提供裤腿轮廓或服装设计。"
+    elif (ref or {}).get("reference_id") == "universal_pose_anchor":
         contract = "这是最终照片的唯一编辑底图。保留整个人物身份、头部与身体朝向、关节、交叠肢体、脚的位置、场景和构图，只编辑指定商品及其必要轮廓区域，绝不能根据商品穿着者转身或重新构图。"
     elif role == "control_map" and (ref or {}).get("reference_id") == "derived_pose_depth":
         contract = "这是紧邻动作图的人物深度辅助，只提供头部转向、肢体关节、前后遮挡与空间结构。动作必须保持画面左右方向，不能镜像。深度图旧衣的轮廓与褶皱不能覆盖新商品的宽松量、裤型、腰头和版型。"
@@ -17342,7 +17347,7 @@ async def apply_fabric_enhancement(operation: str, references: List[Any], batch:
         entry = {'status': 'skipped', 'reason': 'reference_unavailable', 'original_url': url}
         image_control, depth_audit = control, None
         if source:
-            if operation == 'universal' and (context or {}).get('infer_output_depth'):
+            if operation in {'universal', 'pose_transfer'} and (context or {}).get('infer_output_depth'):
                 try:
                     depth_bytes, tier = await render_universal_person_depth(source)
                     depth_path = Path(OUTPUT_OUTPUT_DIR) / f'fabric_depth_{uuid.uuid4().hex}.png'
@@ -20796,6 +20801,11 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     failures = []
     try:
         prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
+        if snapshot["operation"] == "pose_transfer":
+            prepared_refs = [
+                {**ref, "garment_design_owner": True} if (ref.get("role") or ref.get("reference_type")) == "source" else ref
+                for ref in prepared_refs
+            ]
         snapshot["pose_depth"] = pose_depth
         update_ecommerce_task(task_id, {"pose_depth": pose_depth, "generation_prompt": prepared_prompt, "generation_references": prepared_refs})
         for index, route in enumerate(routes):
@@ -20931,7 +20941,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     batch = apply_lookbook_film_finish(batch, snapshot)
                 batch = await apply_selected_studio_background(batch, snapshot, route)
                 if snapshot["operation"] in {"universal", "try_on", "pose_transfer"}:
-                    batch = await apply_fabric_enhancement(snapshot["operation"], snapshot["inputs"], batch, {'infer_output_depth':snapshot['operation']=='universal'})
+                    batch = await apply_fabric_enhancement(snapshot["operation"], snapshot["inputs"], batch, {'infer_output_depth':snapshot['operation'] in {'universal', 'pose_transfer'}})
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",

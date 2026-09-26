@@ -159,6 +159,18 @@ def test_universal_material_mask_uses_depth_of_actual_output(tmp_path):
     assert result['fabric_enhancement'][0]['output_depth']['source_url']=='/output'
 
 
+def test_pose_transfer_material_uses_source_texture_and_output_depth(tmp_path):
+    batch={'images':['/output'],'image_items':[{'url':'/output'}]}
+    refs=[{'role':'source','url':'/b-style'}, {'role':'pose','url':'/a-pose'}]
+    with patch.object(main,'output_file_from_url',side_effect=lambda url:'output.png' if url=='/output' else 'b-style.png' if url=='/b-style' else 'a-pose.png'), patch.object(main,'render_universal_person_depth',AsyncMock(return_value=(b'depth','quality'))) as depth, patch.object(main,'OUTPUT_OUTPUT_DIR',str(tmp_path)), patch.object(main,'media_url_from_path',side_effect=lambda path:path), patch.object(main,'image_output_meta',return_value={}), patch('canvas_core.fabric_enhancement.enhance_fabric_image',return_value={'status':'applied'}) as enhance:
+        result=asyncio.run(main.apply_fabric_enhancement('pose_transfer',refs,batch,{'infer_output_depth':True}))
+    depth.assert_awaited_once_with('output.png')
+    assert enhance.call_count==1
+    assert enhance.call_args.args[1]=='b-style.png'
+    assert Path(enhance.call_args.args[3]).read_bytes()==b'depth'
+    assert result['fabric_enhancement'][0]['output_depth']['source_url']=='/output'
+
+
 def test_universal_output_depth_failure_keeps_existing_mask_fallback():
     batch={'images':['/output'],'image_items':[{'url':'/output'}]}
     with patch.object(main,'output_file_from_url',return_value='output.png'), patch.object(main,'render_universal_person_depth',AsyncMock(side_effect=ValueError('not ready'))), patch('canvas_core.fabric_enhancement.enhance_fabric_image',return_value={'status':'skipped','reason':'garment_mask_ambiguous'}) as enhance:

@@ -125,7 +125,8 @@ UNIVERSAL_PRODUCT_ROLES = {
     "scene_prop",
 }
 UNIVERSAL_GARMENT_ROLES = {"upper_garment", "lower_garment", "full_garment"}
-ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", *UNIVERSAL_REFERENCE_ROLE_IDS}
+POSE_TRANSFER_VIEW_ROLES = ("source_view_1", "source_view_2")
+ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", *POSE_TRANSFER_VIEW_ROLES, *UNIVERSAL_REFERENCE_ROLE_IDS}
 TRY_ON_OUTFIT_ROLES = {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}
 TRY_ON_REFERENCE_ROLES = {"source", "model_identity", *TRY_ON_OUTFIT_ROLES, "detail", "pose"}
 UNIVERSAL_INTERACTIONS = {"wear", "put_on", "hold", "carry", "place", "use", "pose", "scene", "style", "identity"}
@@ -852,6 +853,9 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
             raise ValueError("；".join(plan["conflicts"]))
         return plan["inputs"]
     normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
+    if operation == "pose_transfer":
+        order = {role: index for index, role in enumerate(("source", "pose", *POSE_TRANSFER_VIEW_ROLES))}
+        normalized.sort(key=lambda item: order.get(item["role"], len(order)))
     roles = {item["role"] for item in normalized}
     required = set(OPERATION_INPUTS[operation])
     if operation == "pose_transfer" and str(options.get("pose_source") or "preset") == "reference":
@@ -1076,6 +1080,8 @@ def _reference_detail(item: dict[str, Any], analysis: dict[str, Any] | None = No
 def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
     role_names = {
         "source": "SOURCE / EDIT BASE",
+        "source_view_1": "SAME GARMENT / SUPPLEMENTAL VIEW 1 ONLY",
+        "source_view_2": "SAME GARMENT / SUPPLEMENTAL VIEW 2 ONLY",
         "subject": "MODEL SUBJECT / BODY / FALLBACK POSE",
         "garment": "GARMENT PRODUCT SOURCE",
         "model_identity": "MODEL FACE IDENTITY ONLY",
@@ -1733,7 +1739,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                      "CREATIVE DIRECTOR PLAN: " + plan]
         return " ".join(parts)
     reference_map = build_ordered_reference_map(normalized)
-    if instruction and operation != "universal":
+    if instruction and operation not in {"universal", "pose_transfer"}:
         return build_user_directed_ecommerce_prompt(instruction)
     user_supplement = f"USER SUPPLEMENT: {instruction}" if instruction else ""
     user_supplement_override_rule = build_user_supplement_override_rule(instruction) if operation == "universal" else ""
@@ -1858,19 +1864,44 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
         )
     elif operation == "pose_transfer":
+        supplemental_views = [
+            f"Image {index} ({item.get('name') or item['role']})"
+            for index, item in enumerate(normalized, 1) if item["role"] in POSE_TRANSFER_VIEW_ROLES
+        ]
+        view_lock = (
+            "SUPPLEMENTAL SAME-SKU VIEWS: " + "; ".join(supplemental_views) +
+            " show the very same garment from additional angles. Use them only to verify side/back construction, panel seam continuation, pocket placement, knee-to-hem flare and hem depth that the primary source cannot show. "
+            "The primary source remains authoritative for its visible front; each supplemental view owns only the actual garment surface it reveals. "
+            "Map the correct physical left/right side into the target camera view; an invisible back pocket or side detail must stay hidden. "
+            "Do not copy a supplemental model's pose, face, body orientation, footwear, crop, lighting or background, and do not invent a detail absent from every view. "
+            if supplemental_views else ""
+        )
+        garment_geometry_lock = (
+            "POSE TRANSFER GARMENT OWNERSHIP: the source image is the primary owner of every garment's product design and outer silhouette; supplemental views of the same garment add only otherwise hidden construction evidence. "
+            "Read its actual waistband, rise, pockets, panel seams, stitch paths, leg fit, knee width, hem opening, wash, fabric grain, and footwear before changing the pose. "
+            "Transfer the pose reference's joint positions, weight shift, limb crossing, viewpoint, and crop, but never trace the pose reference clothing boundary or copy its trouser cut. "
+            "Drape the source garment around the new body pose with its original ease and construction: if the source trousers flare below the knee, retain the knee-to-hem widening and a visibly wider bell-shaped hem even when the pose reference wears narrow trousers. "
+            "Keep any source diagonal thigh panel seam continuous and in its original anatomical location; do not turn it into a generic side seam, erase it, or paint it onto the opposite leg. "
+            "Preserve real denim weave, wash gradients, stitching, hem thickness, and folds at close inspection without borrowing fabric texture from the pose image. "
+            + view_lock
+        )
         if str(options.get("pose_source") or "preset") == "reference":
             target = (
                 "Use the pose reference image as the exact spatial template. Match its body posture, joint arrangement, balance, gesture, camera viewpoint, "
-                "shot scale, framing and crop, subject size and position, and foreground composition. If it is full-body, keep full-body; if it is three-quarter, "
+                "shot scale, framing and crop, subject size and position, and foreground composition of the person underneath the clothing. If it is full-body, keep full-body; if it is three-quarter, "
                 "half-body, or close-up, keep the same shot. " + _pose_orientation_lock() + " "
                 "Do not zoom, reframe, extend the body beyond its crop, or reposition the person unless the additional user instruction explicitly requests it. "
-                "Do not copy the pose reference person's identity, clothes, accessories, or background content."
+                "Do not copy the pose reference person's identity, clothes, garment outline, accessories, or background content."
+            )
+            source_preservation = (
+                " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, and lighting; the selected studio replaces the source background. "
+                if studio_background_selected else
+                " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, lighting, and background appearance. "
             )
             task = (
-                target + " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, and lighting; the selected studio replaces the source background. "
-                if studio_background_selected
-                else target + " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, lighting, and background appearance. "
+                target + source_preservation +
                 "Let the pose reference override the source image only for pose and spatial composition. Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
+                + garment_geometry_lock + " "
                 "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; do not preserve the source background when a studio is selected, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
                 "Keep product graphics and garment text non-mirrored and readable after the pose change. "
                 + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
@@ -1878,11 +1909,15 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             )
         else:
             target = "Apply this target pose: " + _preset_prompt(POSE_PRESETS, str(options.get("pose_preset") or "standing_front"), "standing_front") + "."
+            source_preservation = (
+                " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, and lighting; the selected studio replaces the source background. "
+                if studio_background_selected else
+                " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, lighting, and background. "
+            )
             task = (
-                target + " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, and lighting; the selected studio replaces the source background. "
-                if studio_background_selected
-                else target + " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, lighting, and background. "
+                target + source_preservation +
                 "Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
+                + garment_geometry_lock + " "
                 "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; do not preserve the source background when a studio is selected, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
                 "Keep product graphics and garment text non-mirrored and readable after the pose change. "
                 + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
@@ -1970,7 +2005,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         *[lock for lock in operation_locks if lock],
         preservation,
         build_final_studio_background_override(options),
-        user_supplement_override_rule,
+        user_supplement,
+        ("For pose transfer, apply only the attributes explicitly changed in the USER SUPPLEMENT; keep the source garment design and the pose reference ownership for everything else." if operation == "pose_transfer" and instruction else user_supplement_override_rule),
     ]
     return " ".join(part for part in parts if part).strip()
 

@@ -336,10 +336,6 @@ class EcommerceContractTests(unittest.TestCase):
                 [{"role": "source", "url": "/assets/input/model.png"}, {"role": "garment", "url": "/assets/input/top.png"}],
                 {"instruction": "图1穿上图2，并在白墙前拍摄"},
             ),
-            "pose_transfer": (
-                [{"role": "source", "url": "/assets/input/model.png"}],
-                {"pose_preset": "walking", "instruction": "图1坐在沙发上"},
-            ),
             "prop_replace": (
                 [{"role": "source", "url": "/assets/input/model.png"}, {"role": "prop", "url": "/assets/input/bag.png"}],
                 {"target_description": "the handbag", "instruction": "图1手持图2"},
@@ -874,8 +870,48 @@ class EcommerceContractTests(unittest.TestCase):
         ]
         instruction = "改成近景"
         prompt = build_prompt("pose_transfer", references, {"pose_source": "reference", "instruction": instruction})
-        self.assertEqual(prompt, instruction)
-        self.assertNotIn("Additional user instruction", prompt)
+        self.assertIn("USER SUPPLEMENT: 改成近景", prompt)
+        self.assertIn("pose reference image as the exact spatial template", prompt)
+        self.assertIn("source image is the primary owner of every garment's product design and outer silhouette", prompt)
+        self.assertIn("source trousers flare below the knee", prompt)
+        self.assertIn("source diagonal thigh panel seam", prompt)
+        self.assertIn("explicitly changed in the USER SUPPLEMENT", prompt)
+
+    def test_pose_transfer_source_design_is_locked_with_preset_and_studio(self):
+        references = [{"role": "source", "url": "/assets/input/model.png"}]
+        prompt = build_prompt("pose_transfer", references, {"pose_preset": "walking", "studio_reference": "studio_white"})
+        self.assertIn("source image is the primary owner of every garment's product design and outer silhouette", prompt)
+        self.assertIn("source diagonal thigh panel seam", prompt)
+        self.assertIn("selected studio replaces the source background", prompt)
+
+    def test_pose_transfer_source_uses_high_resolution_gemini_reference(self):
+        import main
+        with patch.object(main, "reference_to_data_url", return_value="data:image/jpeg;base64,YQ==") as encode:
+            part = main.gemini_reference_part({"role": "source", "url": "/assets/input/b.jpg", "garment_design_owner": True})
+        self.assertIn("inlineData", part)
+        self.assertEqual(encode.call_args.kwargs, {"max_size": 3072, "lossless": False})
+        text = main.gemini_reference_role_text({"role": "source", "garment_design_owner": True}, 1)
+        self.assertIn("膝下到脚口的宽度变化", text)
+
+    def test_pose_transfer_supplemental_views_are_same_style_evidence_only(self):
+        references = [
+            {"role": "source_view_2", "url": "/assets/input/side.jpg", "name": "B款侧面"},
+            {"role": "pose", "url": "/assets/input/a.jpg"},
+            {"role": "source", "url": "/assets/input/b.jpg"},
+            {"role": "source_view_1", "url": "/assets/input/oblique.jpg", "name": "B款正侧"},
+        ]
+        ordered = validate_input_roles("pose_transfer", references, {"pose_source": "reference"})
+        self.assertEqual([item["role"] for item in ordered], ["source", "pose", "source_view_1", "source_view_2"])
+        prompt = build_prompt("pose_transfer", references, {"pose_source": "reference"})
+        self.assertIn("Image 3 = [SAME GARMENT / SUPPLEMENTAL VIEW 1 ONLY]", prompt)
+        self.assertIn("Image 4 = [SAME GARMENT / SUPPLEMENTAL VIEW 2 ONLY]", prompt)
+        self.assertIn("Map the correct physical left/right side", prompt)
+        self.assertIn("Do not copy a supplemental model's pose", prompt)
+        import main
+        with patch.object(main, "reference_to_data_url", return_value="data:image/jpeg;base64,YQ==") as encode:
+            main.gemini_reference_part({"role": "source_view_1", "url": "/assets/input/oblique.jpg"})
+        self.assertEqual(encode.call_args.kwargs, {"max_size": 3072, "lossless": False})
+        self.assertIn("同一款服装", main.gemini_reference_role_text({"role": "source_view_1"}, 3))
 
     def test_universal_auto_instruction_chooses_prop_interactions(self):
         references = [

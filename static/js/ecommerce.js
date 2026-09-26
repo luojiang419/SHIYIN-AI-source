@@ -1367,6 +1367,7 @@
         if(nextIndex === currentIndex) return false;
         state.tryOnSwitches[role] = tryOnSwitchMeta(direction || (nextIndex > currentIndex ? 1 : -1), candidates[currentIndex] || existing);
         state.inputs[role] = buildTryOnInput(role, existing, candidates, nextIndex);
+        if(role === 'source') state.tryOnPromptPreview = null;
         renderInputs();
         validateForm(false);
         persistSettings();
@@ -1535,6 +1536,13 @@
         const config = currentConfig();
         const sourceInput = config.inputs.find(input => input.role === 'source') || config.inputs[0];
         const sourceReady = Boolean(state.inputs.source?.url);
+        const modelCandidates = tryOnReferenceCandidates(state.inputs.source);
+        const selectedModelIndex = tryOnSelectedReferenceIndex(state.inputs.source, modelCandidates);
+        const modelGallery = step => step !== 0 ? '' : `<div class="ec-tryon-model-gallery">
+            <div class="ec-tryon-model-gallery-head"><strong>已添加模特 ${modelCandidates.length} 位</strong><span>选择一位作为当前试穿模特；生成时仅使用选中的人物图。</span></div>
+            <div class="ec-tryon-model-list" aria-label="已添加的模特">${modelCandidates.map((candidate, index) => `<button type="button" class="ec-tryon-model-choice ${index === selectedModelIndex ? 'is-active' : ''}" data-tryon-model-index="${index}" aria-pressed="${index === selectedModelIndex}"><img src="${escapeHtml(referenceDisplayUrl(candidate))}" alt=""><span>模特 ${index + 1}${candidate.uploading ? ' · 上传中' : candidate.upload_error ? ' · 上传失败' : index === selectedModelIndex ? ' · 当前' : ''}</span></button>`).join('')}</div>
+            <button type="button" class="ec-tryon-add-model" data-add-tryon-model>＋ 添加模特（可多选图片）</button>
+        </div>`;
         const outfitCount = tryOnOutfitCount();
         const requestedStep = Math.max(0, Math.min(3, Number(currentOptions().guide_step) || 0));
         const step = !sourceReady ? 0 : !outfitCount ? Math.min(requestedStep,1) : requestedStep;
@@ -1552,7 +1560,7 @@
         ];
         const stepHtml = steps.map((item,index) => `<button type="button" data-tryon-step="${index}" class="${index === step ? 'active' : item.done ? 'complete' : ''}" ${index > 0 && !sourceReady || index > 1 && !outfitCount ? 'disabled' : ''} aria-current="${index === step ? 'step' : 'false'}"><b>${escapeHtml(item.number)}</b>${escapeHtml(item.label)}</button>`).join('');
         const headlines = [
-            ['锁定人物主体','上传清晰的全身或半身照片。面部、体型与肤色将在生成中保持一致。'],
+            ['选择试穿模特','可添加多位模特并切换当前人物。上传清晰的全身或半身照片。'],
             ['搭建穿搭组合','选择至少一件服饰；每个格子负责一种衣物，可继续添加更多参考。'],
             ['完善造型细节','按需补充动作、局部面料和摄影棚氛围；没有额外要求可以直接下一步。'],
             ['审阅提示词并生成','自动读取已选参考图，规划角色归属、服装层次与画面约束。'],
@@ -1572,14 +1580,17 @@
                     ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') : ''}
                     ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') : ''}
                 </div>
+                ${modelGallery(step)}
                 ${step === 1 && canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
                 ${step === 3 ? `<div class="ec-tryon-prompt-plan"><div><strong>自动提示词</strong><span>参考图 ${taskInputsForRequest().length} 张 · 可在下方补充生成需求</span></div><button type="button" data-tryon-plan-prompt>${prompt ? '重新规划' : '自动规划提示词'}</button><p data-tryon-plan-status>${prompt ? escapeHtml(prompt.message || '规划完成') : '点击后调用视觉分析 API，生成可审阅的最终提示词。'}</p><pre data-tryon-plan-result>${escapeHtml(prompt?.prompt_preview || '尚未规划。生成时系统仍会自动组合角色和服饰约束。')}</pre></div>` : ''}
                 <div class="ec-tryon-step-actions">${step > 0 ? '<button type="button" data-tryon-step-back>上一步</button>' : ''}${step < 3 ? `<button type="button" class="is-primary" data-tryon-step-next>${step === 2 ? '继续到提示词' : '下一步'}</button>` : ''}</div>
             </div>
         </section>`;
-        el.inputProgress.textContent = step === 0 ? `${Number(sourceReady)}/1` : step === 1 ? `${visibleWardrobe.filter(item => state.inputs[item.role]?.url).length}/${visibleWardrobe.length}` : `${completedVisibleReferences}/${visibleReferenceCount}`;
+        el.inputProgress.textContent = step === 0 ? `${modelCandidates.filter(item => item.url).length} 位模特` : step === 1 ? `${visibleWardrobe.filter(item => state.inputs[item.role]?.url).length}/${visibleWardrobe.length}` : `${completedVisibleReferences}/${visibleReferenceCount}`;
         bindInputSlots();
         bindTryOnSlotControls();
+        el.inputSlots.querySelector('[data-add-tryon-model]')?.addEventListener('click', () => openFilePicker('source'));
+        el.inputSlots.querySelectorAll('[data-tryon-model-index]').forEach(button => button.addEventListener('click', () => selectTryOnReference('source', Number(button.dataset.tryonModelIndex))));
         el.inputSlots.querySelector('[data-tryon-detail-target]')?.addEventListener('change', event => {
             state.inputs.detail = state.inputs.detail || {role:'detail', reference_type:'detail', reference_id:'detail'};
             state.inputs.detail.detail_target_id = event.target.value;
@@ -2408,6 +2419,7 @@
 
     function removeInput(role){
         const existing = state.inputs[role];
+        if(state.operation === 'try_on') state.tryOnPromptPreview = null;
         if(removeTryOnSelectedCandidate(role)) {
             // handled below by the shared render/persist path
         } else if(currentConfig()?.universal && role.startsWith('ref_') && existing) {
@@ -2583,7 +2595,10 @@
         const previewUrl = URL.createObjectURL(pair.file);
         const previewInput = buildPreviewInput(pair.file, pair.role, token, previewUrl);
         const activePair = {...pair, upload_token:token, preview_url:previewUrl};
-        if(state.operation === 'try_on' && isTryOnReferenceRole(pair.role)) setTryOnInputCandidate(pair.role, previewInput);
+        if(state.operation === 'try_on' && isTryOnReferenceRole(pair.role)) {
+            state.tryOnPromptPreview = null;
+            setTryOnInputCandidate(pair.role, previewInput);
+        }
         else {
             revokeInputPreviewUrls(state.inputs[pair.role]);
             state.inputs[pair.role] = previewInput;

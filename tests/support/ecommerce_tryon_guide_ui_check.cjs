@@ -7,12 +7,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const page = await browser.newPage({viewport:{width:1500,height:900}});
         await page.addInitScript(() => localStorage.setItem('studio_theme','dark'));
         const calls = [];
+        let uploadCount = 0;
         await page.route('**/api/**', async route => {
             const url = new URL(route.request().url());
             const path = url.pathname;
             const request = route.request();
             if(path === '/api/ecommerce/capabilities') return route.fulfill({json:{models:[{provider_id:'demo',model:'demo-image'}],providers:[{id:'demo',name:'Demo'}],routes:{standard:{provider_id:'demo',model:'demo-image'}},vision_analysis:{enabled:true},reference_slot_types:[]}});
-            if(path === '/api/ai/upload') return route.fulfill({json:{files:[{url:'/static/images/logo.png',kind:'image',width:512,height:512,name:'reference.png'}]}});
+            if(path === '/api/ai/upload') return route.fulfill({json:{files:[{url:`/static/images/logo.png?reference=${++uploadCount}`,kind:'image',width:512,height:512,name:'reference.png'}]}});
             if(path === '/api/ecommerce/analyze') { calls.push({path, body:request.postDataJSON()}); return route.fulfill({json:{status:'succeeded',message:'视觉分析完成',prompt_preview:'人物身份锁定；保留上装材质和颜色；完成真实试穿。',analysis:{status:'succeeded',category:'upper'},reference_plan:{ordered_reference_ids:['source','upper_garment']}}}); }
             if(path === '/api/ecommerce/tasks' && request.method() === 'POST') { calls.push({path, body:request.postDataJSON()}); return route.fulfill({json:{id:'guide-demo',task_id:'guide-demo',operation:'universal',status:'queued',result:null}}); }
             if(path === '/api/ecommerce/tasks/guide-demo') return route.fulfill({json:{id:'guide-demo',task_id:'guide-demo',operation:'universal',status:'succeeded',result:{images:['/static/images/logo.png']}}});
@@ -30,8 +31,33 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('.ec-tryon-slot-card.is-model .ec-upload-slot').click();
         await page.locator('#fileInput').setInputFiles({name:'model.png',mimeType:'image/png',buffer:image});
         await page.locator('.ec-tryon-slot-card.is-model img').waitFor();
+        await page.locator('[data-add-tryon-model]').click();
+        await page.locator('#fileInput').setInputFiles([
+            {name:'model-two.png',mimeType:'image/png',buffer:image},
+            {name:'model-three.png',mimeType:'image/png',buffer:image},
+        ]);
+        await page.locator('[data-tryon-model-index]').nth(2).waitFor();
+        assert.equal(await page.locator('[data-tryon-model-index]').count(),3);
+        await page.locator('[data-tryon-model-index="1"]').click();
+        assert.equal(await page.locator('[data-tryon-model-index="1"]').getAttribute('aria-pressed'),'true');
+        const selectedModelUrl = await page.locator('.ec-tryon-slot-card.is-model .ec-tryon-active-card img').getAttribute('src');
+        const modelLayout = await page.locator('.ec-tryon-model-gallery').evaluate(element => {
+            const rect = element.getBoundingClientRect();
+            return {width:rect.width, right:rect.right, viewport:innerWidth, count:element.querySelectorAll('[data-tryon-model-index]').length};
+        });
+        assert.ok(modelLayout.width > 0 && modelLayout.right <= modelLayout.viewport, '模特列表应完整显示在工作台内');
+        await page.screenshot({path:'.codex-tmp/ecommerce-tryon-multiple-models.png'});
+        await page.locator('[data-tryon-model-index="2"]').click();
+        await page.locator('.ec-tryon-slot-card.is-model [data-action="remove"]').click();
+        assert.equal(await page.locator('[data-tryon-model-index]').count(),2);
+        await page.locator('[data-tryon-model-index="1"]').click();
+        const remainingModelUrl = await page.locator('.ec-tryon-slot-card.is-model .ec-tryon-active-card img').getAttribute('src');
         await page.locator('[data-tryon-step-next]').click();
         assert.equal(await page.locator('.ec-tryon-slot-card.is-model').count(),0);
+        await page.locator('[data-tryon-step-back]').click();
+        assert.equal(await page.locator('[data-tryon-model-index]').count(),2);
+        assert.equal(await page.locator('.ec-tryon-slot-card.is-model .ec-tryon-active-card img').getAttribute('src'),remainingModelUrl);
+        await page.locator('[data-tryon-step-next]').click();
         await page.locator('.ec-tryon-slot-card.is-outfit .ec-upload-slot').first().click();
         await page.locator('#fileInput').setInputFiles({name:'top.png',mimeType:'image/png',buffer:image});
         await page.locator('.ec-tryon-slot-card.is-outfit img').first().waitFor();
@@ -40,6 +66,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('[data-tryon-step-next]').click();
         await page.locator('[data-tryon-plan-prompt]').click();
         await page.locator('[data-tryon-plan-result]').getByText('人物身份锁定；保留上装材质和颜色；完成真实试穿。').waitFor();
+        const analyzeCall = calls.find(item => item.path === '/api/ecommerce/analyze');
+        assert.equal(analyzeCall.body.inputs.filter(item => item.role === 'source').length,1);
+        assert.equal(analyzeCall.body.inputs.find(item => item.role === 'source').url,selectedModelUrl);
         await page.locator('[data-generate-tryon-guide]').click();
         await page.locator('[data-export-tryon-guide]').waitFor({timeout:10000});
         const guideCall = calls.find(item => item.path === '/api/ecommerce/tasks');
@@ -54,6 +83,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.waitForTimeout(3500);
         await page.screenshot({path:'.codex-tmp/ecommerce-tryon-guide-demo.png',fullPage:true});
         await page.setViewportSize({width:520,height:900});
+        await page.locator('.ec-tryon-stepbar [data-tryon-step="0"]').click();
+        const narrowGallery = await page.locator('.ec-tryon-model-gallery').evaluate(element => element.getBoundingClientRect().right <= innerWidth);
+        assert.ok(narrowGallery,'窄屏模特列表不应超出视口');
         await page.locator('.ec-tryon-stepbar [data-tryon-step="1"]').click();
         const columns = await page.locator('.ec-tryon-closet-grid').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
         assert.equal(columns,1,'窄屏服饰步骤应为单列');

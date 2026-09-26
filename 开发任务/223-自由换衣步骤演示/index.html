@@ -3,16 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>正在打开自由换衣页面</title>
+  <title>自由换衣 · 完整页面演示</title>
+  <style>
+    html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#141414}
+    #fitFrame{position:fixed;width:1580px;height:1250px;overflow:hidden;transform-origin:top left;border:1px solid #383838;border-radius:24px;background:#1b1b1b;box-shadow:0 24px 70px #0008}
+    #fitFrame iframe{display:block;width:100%;height:100%;border:0}
+  </style>
 </head>
 <body>
-  <p>正在打开电商专用 · 自由换衣演示。<a id="openDemo" href="http://127.0.0.1:8766/demo/tryon?step=1">点击这里手动打开</a></p>
+  <div id="fitFrame"><iframe id="ecommerceDemo" title="电商专用自由换衣完整页面演示"></iframe></div>
   <script>
-    const value = Number(new URLSearchParams(location.search).get('step') || 1);
-    const step = Number.isFinite(value) ? Math.max(1, Math.min(4, Math.trunc(value))) : 1;
-    const target = `http://127.0.0.1:8766/demo/tryon?step=${step}`;
-    document.getElementById('openDemo').href = target;
-    location.replace(target);
+    const value=Number(new URLSearchParams(location.search).get('step')||1);
+    const step=Number.isFinite(value)?Math.max(1,Math.min(4,Math.trunc(value))):1;
+    const frame=document.getElementById('fitFrame');
+    const designWidth=1580,designHeight=1250;
+    function fit(){
+      const margin=Math.max(10,Math.min(24,innerWidth*.02));
+      const scale=Math.min(1,(innerWidth-margin*2)/designWidth,(innerHeight-margin*2)/designHeight);
+      frame.style.transform=`scale(${scale})`;
+      frame.style.left=`${Math.round((innerWidth-designWidth*scale)/2)}px`;
+      frame.style.top=`${Math.round((innerHeight-designHeight*scale)/2)}px`;
+    }
+    addEventListener('resize',fit);
+    fit();
+    document.getElementById('ecommerceDemo').src=`http://127.0.0.1:8766/demo/tryon?step=${step}`;
   </script>
 </body>
 </html>

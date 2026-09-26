@@ -2425,6 +2425,66 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
     background:color-mix(in srgb,var(--ec-control) 38%,var(--ec-result-frame-bg));
 }
 
+/* 自由换衣引导式流程与独立穿搭指南。 */
+.ec-page.is-try-on .ec-tryon-stepbar button {
+    min-width:0; min-height:46px; display:flex; align-items:center; gap:8px;
+    padding:0 12px; border:1px solid var(--ec-border); border-radius:13px;
+    background:color-mix(in srgb,var(--ec-panel) 72%,transparent);
+    color:var(--ec-muted); font-size:11px; font-weight:800; text-align:left; cursor:pointer;
+}
+.ec-page.is-try-on .ec-tryon-stepbar button b { font:800 10px "JetBrains Mono",monospace; }
+.ec-page.is-try-on .ec-tryon-stepbar button.active { border-color:var(--ec-border-strong); background:var(--ec-control); color:var(--ec-text); box-shadow:var(--ec-tryon-shadow-soft); }
+.ec-page.is-try-on .ec-tryon-stepbar button.complete b { color:var(--ec-success); }
+.ec-page.is-try-on .ec-tryon-stepbar button:disabled { opacity:.46; cursor:not-allowed; }
+.ec-tryon-step-intro { grid-column:1/-1; padding:2px 2px 8px; }
+.ec-tryon-step-intro small, .ec-tryon-prompt-plan span, .ec-tryon-guide-head small { color:var(--ec-muted); font-size:10px; font-weight:800; letter-spacing:.1em; }
+.ec-tryon-step-intro h3 { margin:7px 0 4px; color:var(--ec-text); font-size:20px; }
+.ec-tryon-step-intro p { margin:0; color:var(--ec-muted); font-size:12px; line-height:1.6; }
+.ec-page.is-try-on .ec-tryon-closet-grid:empty { display:none; }
+.ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { grid-template-columns:minmax(210px,280px); }
+.ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,
+.ec-page.is-try-on[data-tryon-step="2"] .ec-tryon-closet-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.ec-tryon-step-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:8px; }
+.ec-tryon-step-actions button, .ec-tryon-prompt-plan button, .ec-tryon-guide-head button, .ec-tryon-guide-result button {
+    min-height:38px; padding:0 16px; border:1px solid var(--ec-border-strong); border-radius:11px;
+    background:var(--ec-control); color:var(--ec-text); font-size:11px; font-weight:800; cursor:pointer;
+}
+.ec-tryon-step-actions button.is-primary, .ec-tryon-prompt-plan button, .ec-tryon-guide-head button { background:var(--ec-text); color:var(--ec-panel); border-color:var(--ec-text); }
+.ec-tryon-prompt-plan { display:grid; gap:12px; padding:18px; border:1px solid var(--ec-border); border-radius:18px; background:var(--ec-control); }
+.ec-tryon-prompt-plan button { justify-self:start; }
+.ec-tryon-prompt-plan > div { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.ec-tryon-prompt-plan strong { color:var(--ec-text); font-size:14px; }
+.ec-tryon-prompt-plan p { margin:0; color:var(--ec-muted); font-size:11px; }
+.ec-tryon-prompt-plan pre { min-height:120px; max-height:300px; overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; padding:14px; border:1px solid var(--ec-border); border-radius:12px; background:var(--ec-panel); color:var(--ec-text); font:11px/1.6 "JetBrains Mono",monospace; }
+.ec-page.is-try-on:not([data-tryon-step="3"]) .ec-operation-controls { display:none; }
+.ec-page.is-try-on .ec-result-panel { grid-template-rows:auto minmax(500px,1fr) auto; overflow-y:auto; align-content:start; }
+.ec-page.is-try-on .ec-result-body { overflow:hidden; }
+.ec-page.is-try-on .ec-empty-result { overflow-y:auto; }
+.ec-page.is-try-on .ec-tryon-prompt-plan pre { min-height:96px; max-height:190px; }
+.ec-tryon-guide-panel { display:grid; gap:10px; min-width:0; margin-top:12px; padding:13px; border:1px solid var(--ec-border); border-radius:16px; background:var(--ec-result-soft-bg); }
+.ec-tryon-guide-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.ec-tryon-guide-head h3 { margin:3px 0; color:var(--ec-text); font-size:14px; }
+.ec-tryon-guide-head p, .ec-tryon-guide-state { margin:0; color:var(--ec-muted); font-size:10px; line-height:1.5; }
+.ec-tryon-guide-head button:disabled, .ec-tryon-guide-result button:disabled { opacity:.5; cursor:not-allowed; }
+.ec-tryon-guide-result { display:grid; grid-template-columns:72px minmax(0,1fr); gap:10px; align-items:center; }
+.ec-tryon-guide-result img { width:72px; height:92px; object-fit:contain; border-radius:8px; background:var(--ec-panel); cursor:zoom-in; }
+.ec-tryon-guide-result > div { display:flex; flex-wrap:wrap; gap:7px; align-items:center; color:var(--ec-text); font-size:10px; }
+.ec-tryon-guide-result label { display:flex; align-items:center; gap:5px; }
+.ec-tryon-guide-result select { max-width:105px; padding:6px; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-control); color:var(--ec-text); }
+@media (max-width:860px) {
+    .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,
+    .ec-page.is-try-on[data-tryon-step="2"] .ec-tryon-closet-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .ec-page.is-try-on .ec-result-panel { min-height:680px; }
+}
+@media (max-width:560px) {
+    .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid,
+    .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,
+    .ec-page.is-try-on[data-tryon-step="2"] .ec-tryon-closet-grid { grid-template-columns:1fr; }
+    .ec-tryon-step-intro h3 { font-size:17px; }
+    .ec-tryon-guide-head { align-items:flex-start; }
+    .ec-tryon-guide-head button { padding:0 10px; }
+}
+
 @media (max-width:1280px) {
     .ec-page.is-try-on .ec-workspace {
         grid-template-columns:minmax(0,1fr) minmax(350px,400px);

@@ -97,7 +97,7 @@
 
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:'', generation_style:'standard_product'},
-        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, studio_reference:''},
+        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, studio_reference:'', guide_step:0, guide_task_id:''},
         batch_outfit:{},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
     };
@@ -145,6 +145,8 @@
         referenceSlotTypes:[],
         referencePreview:{key:'', versions:[], selectedIndex:0, mode:'preview', ratio:'free', cropRect:{x:.05,y:.05,w:.9,h:.9}, drag:null},
         tryOnSwitches:{},
+        tryOnPromptPreview:null,
+        tryOnGuide:{task:null, submitting:false, error:'', timer:null},
         compareViewer:null,
         viewportWidth:window.innerWidth,
         settingsNeedsMigration:false,
@@ -1534,36 +1536,48 @@
         const sourceInput = config.inputs.find(input => input.role === 'source') || config.inputs[0];
         const sourceReady = Boolean(state.inputs.source?.url);
         const outfitCount = tryOnOutfitCount();
-        const ready = tryOnReady();
-        const visibleWardrobe = visibleTryOnWardrobeRoles();
+        const requestedStep = Math.max(0, Math.min(3, Number(currentOptions().guide_step) || 0));
+        const step = !sourceReady ? 0 : !outfitCount ? Math.min(requestedStep,1) : requestedStep;
+        currentOptions().guide_step = step;
+        const visibleWardrobe = visibleTryOnWardrobeRoles().filter(item => item.role !== 'pose');
         const visibleReferenceCount = 1 + visibleWardrobe.length;
         const referenceLimit = 1 + TRY_ON_WARDROBE_ROLES.length;
-        const canAddReference = visibleWardrobe.length < TRY_ON_WARDROBE_ROLES.length;
+        const canAddReference = visibleWardrobe.length < TRY_ON_OUTFIT_ROLES.length;
         const completedVisibleReferences = Number(sourceReady) + visibleWardrobe.filter(item => state.inputs[item.role]?.url).length;
         const steps = [
-            {number:'01', label:t('ecommerce.tryOnStepModel'), className:sourceReady ? 'complete' : 'active'},
-            {number:'02', label:t('ecommerce.tryOnStepGarment'), className:outfitCount ? 'complete' : (sourceReady ? 'active' : '')},
-            {number:'03', label:t('ecommerce.tryOnPreviewTitle'), className:outfitCount ? 'active' : ''},
-            {number:'04', label:t('ecommerce.tryOnStepGenerate'), className:ready ? 'active' : ''},
+            {number:'01', label:t('ecommerce.tryOnStepModel'), done:sourceReady},
+            {number:'02', label:t('ecommerce.tryOnStepGarment'), done:outfitCount > 0},
+            {number:'03', label:t('ecommerce.tryOnStepTune'), done:step > 2},
+            {number:'04', label:t('ecommerce.tryOnStepGenerate'), done:false},
         ];
-        const stepHtml = steps.map(step => `<span class="${escapeHtml(step.className)}"><b>${escapeHtml(step.number)}</b>${escapeHtml(step.label)}</span>`).join('');
+        const stepHtml = steps.map((item,index) => `<button type="button" data-tryon-step="${index}" class="${index === step ? 'active' : item.done ? 'complete' : ''}" ${index > 0 && !sourceReady || index > 1 && !outfitCount ? 'disabled' : ''} aria-current="${index === step ? 'step' : 'false'}"><b>${escapeHtml(item.number)}</b>${escapeHtml(item.label)}</button>`).join('');
+        const headlines = [
+            ['锁定人物主体','上传清晰的全身或半身照片。面部、体型与肤色将在生成中保持一致。'],
+            ['搭建穿搭组合','选择至少一件服饰；每个格子负责一种衣物，可继续添加更多参考。'],
+            ['完善造型细节','按需补充动作、局部面料和摄影棚氛围；没有额外要求可以直接下一步。'],
+            ['审阅提示词并生成','自动读取已选参考图，规划角色归属、服装层次与画面约束。'],
+        ];
+        const prompt = state.tryOnPromptPreview;
+        el.ecommercePage.dataset.tryonStep = String(step);
         el.inputSlots.innerHTML = `<section class="ec-tryon-studio" aria-label="${escapeHtml(t('ecommerce.tryOnAtelier'))}">
             <div class="ec-tryon-stepbar">${stepHtml}</div>
             <div class="ec-tryon-materials">
+                <div class="ec-tryon-step-intro"><small>STEP ${step + 1} / 4</small><h3>${headlines[step][0]}</h3><p>${headlines[step][1]}</p></div>
                 <div class="ec-tryon-reference-grid ec-tryon-closet-grid" aria-label="${escapeHtml(t('ecommerce.tryOnWardrobe'))}">
-                    <div class="ec-tryon-slot-card is-model">
+                    ${step === 0 ? `<div class="ec-tryon-slot-card is-model">
                         <div class="ec-tryon-card-kicker"><b>01</b><span>${escapeHtml(t('ecommerce.tryOnModelStage'))}</span></div>
                         ${inputSlotHtml(sourceInput)}
                         ${tryOnReferenceTypeRow('source')}
-                    </div>
-                    ${visibleWardrobe.map(tryOnWardrobeCard).join('')}
-                    ${tryOnFabricDetailCard()}
-                    ${studioReferenceCardHtml('try_on')}
+                    </div>` : ''}
+                    ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') : ''}
+                    ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') : ''}
                 </div>
-                ${canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
+                ${step === 1 && canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
+                ${step === 3 ? `<div class="ec-tryon-prompt-plan"><div><strong>自动提示词</strong><span>参考图 ${taskInputsForRequest().length} 张 · 可在下方补充生成需求</span></div><button type="button" data-tryon-plan-prompt>${prompt ? '重新规划' : '自动规划提示词'}</button><p data-tryon-plan-status>${prompt ? escapeHtml(prompt.message || '规划完成') : '点击后调用视觉分析 API，生成可审阅的最终提示词。'}</p><pre data-tryon-plan-result>${escapeHtml(prompt?.prompt_preview || '尚未规划。生成时系统仍会自动组合角色和服饰约束。')}</pre></div>` : ''}
+                <div class="ec-tryon-step-actions">${step > 0 ? '<button type="button" data-tryon-step-back>上一步</button>' : ''}${step < 3 ? `<button type="button" class="is-primary" data-tryon-step-next>${step === 2 ? '继续到提示词' : '下一步'}</button>` : ''}</div>
             </div>
         </section>`;
-        el.inputProgress.textContent = `${completedVisibleReferences}/${visibleReferenceCount}`;
+        el.inputProgress.textContent = step === 0 ? `${Number(sourceReady)}/1` : step === 1 ? `${visibleWardrobe.filter(item => state.inputs[item.role]?.url).length}/${visibleWardrobe.length}` : `${completedVisibleReferences}/${visibleReferenceCount}`;
         bindInputSlots();
         bindTryOnSlotControls();
         el.inputSlots.querySelector('[data-tryon-detail-target]')?.addEventListener('change', event => {
@@ -1573,7 +1587,37 @@
             validateForm(false);
         });
         bindStudioReferenceControls();
+        el.inputSlots.querySelectorAll('[data-tryon-step]').forEach(button => button.addEventListener('click', () => setTryOnStep(Number(button.dataset.tryonStep))));
+        el.inputSlots.querySelector('[data-tryon-step-back]')?.addEventListener('click', () => setTryOnStep(step - 1));
+        el.inputSlots.querySelector('[data-tryon-step-next]')?.addEventListener('click', () => setTryOnStep(step + 1));
+        el.inputSlots.querySelector('[data-tryon-plan-prompt]')?.addEventListener('click', planTryOnPrompt);
         syncTryOnLookPreview();
+    }
+
+    function setTryOnStep(next){
+        if(next > 0 && !state.inputs.source?.url) return showToast('请先上传人物参考图', true);
+        if(next > 1 && !tryOnOutfitCount()) return showToast(t('ecommerce.tryOnOutfitRequired'), true);
+        currentOptions().guide_step = Math.max(0, Math.min(3, next));
+        persistSettings();
+        renderInputs();
+    }
+
+    async function planTryOnPrompt(){
+        if(!tryOnReady()) return showToast('请先上传人物和至少一件服饰', true);
+        const button = el.inputSlots.querySelector('[data-tryon-plan-prompt]');
+        const status = el.inputSlots.querySelector('[data-tryon-plan-status]');
+        button.disabled = true;
+        status.textContent = '正在分析参考图并规划提示词…';
+        try {
+            const payload = ecommerceTaskPayload();
+            const result = await fetchJson('/api/ecommerce/analyze', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+            state.tryOnPromptPreview = result;
+            button.textContent = '重新规划';
+            status.textContent = result.message || '提示词已规划';
+            el.inputSlots.querySelector('[data-tryon-plan-result]').textContent = result.prompt_preview || '未返回提示词';
+        } catch(error) {
+            status.textContent = `规划失败：${error.message}`;
+        } finally { button.disabled = false; }
     }
 
     function tryOnPreviewItems(){
@@ -1609,6 +1653,7 @@
     function syncTryOnLookPreview(){
         if(!el.emptyResult) return;
         const active = state.operation === 'try_on';
+        syncTryOnGuidePanel();
         el.emptyResult.classList.toggle('has-tryon-preview', active);
         let stage = byId('tryOnLookPreview');
         if(!active) {
@@ -1646,6 +1691,100 @@
             <p>${escapeHtml(t('ecommerce.tryOnPreviewBoardHint'))}</p>
         </section>`;
         requestAnimationFrame(applyTryOnPreviewCutouts);
+    }
+
+    function syncTryOnGuidePanel(){
+        const resultPanel = el.emptyResult?.closest('.ec-result-panel');
+        if(!resultPanel) return;
+        let panel = byId('tryOnGuidePanel');
+        if(state.operation !== 'try_on') { panel?.remove(); return; }
+        if(!panel) {
+            panel = document.createElement('section');
+            panel.id = 'tryOnGuidePanel';
+            panel.className = 'ec-tryon-guide-panel';
+            resultPanel.appendChild(panel);
+        }
+        const guide = state.tryOnGuide;
+        const task = guide.task;
+        const image = task?.result?.images?.[0] || '';
+        const running = guide.submitting || ['queued','running'].includes(task?.status);
+        panel.innerHTML = `<div class="ec-tryon-guide-head"><div><small>OUTFIT GUIDE</small><h3>任务穿搭指南图</h3><p>AI 根据人物与服饰参考，制作可分享的完整搭配图。</p></div><button type="button" data-generate-tryon-guide ${!tryOnReady() || running ? 'disabled' : ''}>${running ? '生成中…' : image ? '重新生成' : '生成指南图'}</button></div>
+            ${image ? `<div class="ec-tryon-guide-result"><img src="${escapeHtml(image)}" alt="AI 生成的任务穿搭指南图"><div><span>指南图已完成</span><label>选择导出 <select data-tryon-guide-format><option value="png">PNG 图片</option><option value="jpeg">JPG 图片</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div></div>` : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guide.error || (running ? '已提交图片生成 API，正在绘制穿搭指南…' : '上传人物与服饰后，即可生成穿搭指南图。'))}</p>`}`;
+        panel.querySelector('[data-generate-tryon-guide]')?.addEventListener('click', generateTryOnGuide);
+        panel.querySelector('[data-export-tryon-guide]')?.addEventListener('click', exportTryOnGuide);
+        if(!task && currentOptions().guide_task_id && !guide.loading) void pollTryOnGuide();
+    }
+
+    async function generateTryOnGuide(){
+        if(!tryOnReady() || state.tryOnGuide.submitting) return;
+        const guide = state.tryOnGuide;
+        guide.submitting = true;
+        guide.error = '';
+        syncTryOnGuidePanel();
+        const references = taskInputsForRequest().map(item => ({...item,
+            role:item.role === 'source' ? 'model_identity' : item.role,
+            reference_type:item.role === 'source' ? 'model_identity' : item.role,
+        }));
+        const referenceMap = references.map((item,index) => `Image ${index + 1}: ${item.role} (${item.label || item.name || 'reference'})`).join('; ');
+        const prompt = `Create ONE premium portrait-format fashion outfit guide image for this exact task. Use the supplied references as factual evidence: ${referenceMap}. Show the same person's identity, natural proportions and skin tone in a polished full-length hero styling image, wearing the exact supplied outfit pieces in physically plausible layering. Around the hero, arrange clean, well-spaced product detail callouts for each supplied garment, footwear and accessory. Include a compact harmonious color palette and three concise visual styling notes represented through clear pictograms; no invented products, brands, prices or claims. Editorial art direction, refined typography limited to a short title "OUTFIT GUIDE" and short category labels, restrained warm neutral background, strong hierarchy, generous whitespace, precise cutouts and realistic fabric texture. Preserve the actual cuts, colors, logos and materials in the references. If any input is only a pose or detail reference, use it only for that assigned purpose. Return one finished high-resolution image, no UI chrome, no watermark.`;
+        try {
+            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:state.providerId, model:state.model, aspect_ratio:'3:4', resolution:state.resolution === 'auto' ? '2k' : state.resolution, quality:state.quality, count:1, parent_task_id:''};
+            const task = await fetchJson('/api/ecommerce/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+            guide.task = task;
+            currentOptions().guide_task_id = taskIdOf(task);
+            persistSettings();
+            scheduleTryOnGuidePoll();
+        } catch(error) { guide.error = `指南图生成失败：${error.message}`; }
+        finally { guide.submitting = false; syncTryOnGuidePanel(); }
+    }
+
+    function scheduleTryOnGuidePoll(){
+        clearTimeout(state.tryOnGuide.timer);
+        state.tryOnGuide.timer = setTimeout(pollTryOnGuide, 1800);
+    }
+
+    async function pollTryOnGuide(){
+        const guide = state.tryOnGuide;
+        const id = state.options.try_on?.guide_task_id;
+        if(!id || guide.loading) return;
+        guide.loading = true;
+        try {
+            guide.task = await fetchJson(`/api/ecommerce/tasks/${encodeURIComponent(id)}`);
+            guide.error = guide.task.status === 'failed' ? `指南图生成失败：${guide.task.error || '请重试'}` : '';
+            syncTryOnGuidePanel();
+            if(['queued','running'].includes(guide.task.status)) scheduleTryOnGuidePoll();
+        } catch(error) { guide.error = `指南任务读取失败：${error.message}`; syncTryOnGuidePanel(); }
+        finally { guide.loading = false; }
+    }
+
+    async function exportTryOnGuide(){
+        const panel = byId('tryOnGuidePanel');
+        const url = state.tryOnGuide.task?.result?.images?.[0];
+        if(!url) return;
+        const format = panel?.querySelector('[data-tryon-guide-format]')?.value === 'jpeg' ? 'jpeg' : 'png';
+        const button = panel?.querySelector('[data-export-tryon-guide]');
+        if(button) button.disabled = true;
+        try {
+            const response = await fetch(url);
+            if(!response.ok) throw new Error(`HTTP ${response.status}`);
+            const bitmap = await createImageBitmap(await response.blob());
+            const canvas = document.createElement('canvas');
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            const context = canvas.getContext('2d');
+            if(format === 'jpeg') { context.fillStyle = '#ffffff'; context.fillRect(0,0,canvas.width,canvas.height); }
+            context.drawImage(bitmap,0,0);
+            bitmap.close();
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, `image/${format}`, .94));
+            if(!blob) throw new Error('图片转换失败');
+            const downloadUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = `outfit-guide-${Date.now()}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(downloadUrl), 60000);
+        } catch(error) { showToast(`导出失败：${error.message}`, true); }
+        finally { if(button) button.disabled = false; }
     }
 
     function backgroundDistance(pixel, bg){
@@ -2188,6 +2327,13 @@
             const update = (deferSync=false) => {
                 const key = input.dataset.option;
                 currentOptions()[key] = input.type === 'checkbox' ? input.checked : (input.type === 'range' ? Number(input.value) : input.value);
+                if(state.operation === 'try_on' && key === 'instruction' && state.tryOnPromptPreview) {
+                    state.tryOnPromptPreview = null;
+                    const status = el.inputSlots.querySelector('[data-tryon-plan-status]');
+                    if(status) status.textContent = '生成需求已变化，请重新规划提示词。';
+                    const preview = el.inputSlots.querySelector('[data-tryon-plan-result]');
+                    if(preview) preview.textContent = '等待重新规划。';
+                }
                 const target = el.operationControls.querySelector(`[data-value-for="${key}"]`);
                 if(target) target.textContent = `${input.value}°`;
                 persistSettings(deferSync ? {sync:false} : undefined);

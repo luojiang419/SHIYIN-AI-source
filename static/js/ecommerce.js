@@ -1802,10 +1802,14 @@
     }
 
     function tryOnGenerationReferencesHtml(modelCandidates, selectedModelIndex){
-        const modelCards = modelCandidates.filter(item => referenceDisplayUrl(item)).map((item,index) => `<div class="ec-tryon-generation-card ${index === selectedModelIndex ? 'is-selected' : ''}"><button type="button" class="ec-tryon-generation-photo" data-tryon-model-index="${index}" aria-label="选择模特 ${index + 1}"><img src="${escapeHtml(referenceDisplayUrl(item))}" alt="模特 ${index + 1}"></button><div class="ec-tryon-generation-caption"><b>${String(index + 1).padStart(2,'0')}</b><span>模特 ${index + 1}</span>${index === selectedModelIndex ? '<em>本次使用</em>' : ''}<button type="button" data-tryon-model-remove="${index}" aria-label="删除模特 ${index + 1}">×</button></div><label class="ec-reference-type-row ec-tryon-type-row"><span>类型</span>${referenceTypeComboHtml({selected:selectedSlotTypeId(item,'source'),context:'try_on',fallbackRole:'source',item,dataAttr:'data-tryon-model-type',dataValue:String(index)})}</label>${tryOnDescriptionRow('source',item,index)}</div>`).join('');
+        const selectedModel = modelCandidates[selectedModelIndex] || modelCandidates[0];
+        const modelIndex = Math.max(0,modelCandidates.indexOf(selectedModel));
+        const modelThumbs = modelCandidates.length > 1 ? `<div class="ec-tryon-generation-model-strip" aria-label="选择本次模特">${modelCandidates.map((item,index) => `<button type="button" data-tryon-model-index="${index}" class="${index === modelIndex ? 'is-selected' : ''}" aria-label="选择模特 ${index + 1}" aria-pressed="${index === modelIndex}"><img src="${escapeHtml(referenceDisplayUrl(item))}" alt=""></button>`).join('')}</div>` : '';
+        const modelCard = selectedModel && referenceDisplayUrl(selectedModel) ? `<div class="ec-tryon-generation-card is-model-hero is-selected"><div class="ec-tryon-generation-hero-photo"><img src="${escapeHtml(referenceDisplayUrl(selectedModel))}" alt="本次选中的模特 ${modelIndex + 1}">${modelThumbs}</div><div class="ec-tryon-generation-caption"><b>${String(modelIndex + 1).padStart(2,'0')}</b><span>模特 ${modelIndex + 1}</span><em>本次使用</em><button type="button" data-tryon-model-remove="${modelIndex}" aria-label="删除模特 ${modelIndex + 1}">×</button></div><label class="ec-reference-type-row ec-tryon-type-row"><span>类型</span>${referenceTypeComboHtml({selected:selectedSlotTypeId(selectedModel,'source'),context:'try_on',fallbackRole:'source',item:selectedModel,dataAttr:'data-tryon-model-type',dataValue:String(modelIndex)})}</label>${tryOnDescriptionRow('source',selectedModel,modelIndex)}</div>` : '';
         const references = tryOnInputEntriesForRequest().filter(([slotRole,item]) => slotRole !== 'source' && referenceDisplayUrl(item));
         const referenceCards = references.map(([slotRole,item],index) => `<div class="ec-tryon-generation-card" data-tryon-wardrobe-role="${escapeHtml(slotRole)}"><img src="${escapeHtml(referenceDisplayUrl(item))}" alt="${escapeHtml(requestReferenceLabel(item,`参考图 ${index + 1}`))}"><div class="ec-tryon-generation-caption"><b>${String(index + 2).padStart(2,'0')}</b><span>${escapeHtml(requestReferenceLabel(item,`参考图 ${index + 1}`))}</span>${slotRole.startsWith('tryon_extra_') ? `<button type="button" data-remove-tryon-extra="${escapeHtml(slotRole)}" aria-label="删除此卡片">×</button>` : ''}</div>${tryOnReferenceTypeRow(slotRole)}${tryOnRequestRoleForSlot(slotRole,item) === 'detail' ? tryOnFabricDetailTargetHtml(slotRole) : ''}${tryOnDescriptionRow(slotRole,item)}</div>`).join('');
-        return `<div class="ec-tryon-generation-references"><section class="ec-tryon-generation-models"><h4>模特图 <small>拖入此列可添加模特</small></h4><div>${modelCards}</div></section><section class="ec-tryon-generation-outfit"><h4>服饰与参考 <small>拖入此列可添加服饰或参考</small></h4><div>${referenceCards}</div></section></div>`;
+        const columns = Math.max(1,Math.ceil(references.length / 2));
+        return `<div class="ec-tryon-generation-references"><section class="ec-tryon-generation-models"><h4>本次模特 <small>拖入此列可添加模特</small></h4>${modelCard}</section><section class="ec-tryon-generation-outfit"><h4>服饰与参考 <small>两排展示 · 拖入可添加卡片</small></h4><div style="--ec-tryon-ref-columns:${columns};min-width:${columns * 160 + Math.max(0,columns - 1) * 10}px">${referenceCards}</div></section></div>`;
     }
 
     function updateTryOnModelMetadata(index, patch){
@@ -1839,6 +1843,7 @@
         currentOptions().guide_step = Math.max(0, Math.min(3, next));
         persistSettings();
         renderInputs();
+        if(el.controlInputMount) el.controlInputMount.scrollTop = 0;
     }
 
     function tryOnPreviewItems(){

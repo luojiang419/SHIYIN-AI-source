@@ -134,6 +134,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.equal(await page.locator('.ec-tryon-generation-model-strip button').count(),2);
         assert.equal(await page.locator('.ec-tryon-generation-models .is-model-hero.is-selected').count(),1);
         assert.equal(await page.locator('.ec-tryon-generation-outfit .ec-tryon-generation-card').count(),4);
+        assert.equal(await page.locator('.ec-tryon-generation-card input').count(),0,'生成页不应常驻描述编辑框');
+        assert.match(await page.locator('.ec-tryon-generation-models .ec-tryon-generation-note').textContent(),/保持这位模特的面部和身形/);
         const generationLayout = await page.locator('.ec-tryon-generation-references').evaluate(element => {
             const model=element.querySelector('.is-model-hero img').getBoundingClientRect();
             const references=[...element.querySelectorAll('.ec-tryon-generation-outfit .ec-tryon-generation-card')].map(card => card.getBoundingClientRect());

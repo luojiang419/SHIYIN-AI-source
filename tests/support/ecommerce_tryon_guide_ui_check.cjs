@@ -135,7 +135,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.equal(await page.locator('.ec-tryon-generation-models .is-model-hero.is-selected').count(),1);
         assert.equal(await page.locator('.ec-tryon-generation-outfit .ec-tryon-generation-card').count(),4);
         assert.equal(await page.locator('.ec-tryon-generation-card input').count(),0,'生成页不应常驻描述编辑框');
-        assert.match(await page.locator('.ec-tryon-generation-models .ec-tryon-generation-note').textContent(),/保持这位模特的面部和身形/);
+        assert.equal(await page.locator('.ec-tryon-generation-note').count(),0,'生成页不应展示替代描述文字控件');
+        const typeButtonStyle = await page.locator('.ec-tryon-generation-outfit .ec-reference-type-button').first().evaluate(button => ({border:getComputedStyle(button).borderTopWidth,background:getComputedStyle(button).backgroundColor}));
+        assert.notEqual(typeButtonStyle.border,'0px','生成页类型选择应保留原有卡片控件外观');
+        assert.notEqual(typeButtonStyle.background,'rgba(0, 0, 0, 0)');
         const generationLayout = await page.locator('.ec-tryon-generation-references').evaluate(element => {
             const model=element.querySelector('.is-model-hero img').getBoundingClientRect();
             const references=[...element.querySelectorAll('.ec-tryon-generation-outfit .ec-tryon-generation-card')].map(card => card.getBoundingClientRect());

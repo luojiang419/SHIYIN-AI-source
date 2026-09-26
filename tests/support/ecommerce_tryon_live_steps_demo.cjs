@@ -90,6 +90,15 @@ const asset = name => path.join(assetDir,name);
         assert.ok(calls.some(item=>item.path==='/api/ecommerce/analyze'&&item.status===200));
         const promptText = await page.locator('[data-tryon-plan-result]').textContent();
         fs.writeFileSync(path.join(outputDir,'verification.json'),JSON.stringify({baseUrl,uploads:6,analysisHttpStatus:200,promptLength:promptText.length,screenshots},null,2));
+        if(process.env.TRYON_DEMO_ACCOUNT) {
+            const seed = await page.evaluate(() => {
+                const accountId = window.StudioPageState?.accountId || '';
+                const settings = localStorage.getItem(`studio_ecommerce_settings_v2:account:${accountId}`) || localStorage.getItem('studio_ecommerce_settings_v2') || '';
+                return {accountId,settings};
+            });
+            assert.ok(seed.accountId && seed.settings,'无法保存演示账号的页面状态');
+            fs.writeFileSync(path.resolve('.codex-tmp/tryon-steps-demo/seed-settings.json'),JSON.stringify(seed));
+        }
         await page.waitForTimeout(900);
         console.log(`四步真实页面演示通过：${screenshots.join(', ')}`);
     } finally {await browser.close();}

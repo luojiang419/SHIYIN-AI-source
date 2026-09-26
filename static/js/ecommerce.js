@@ -4476,6 +4476,14 @@
             if(incoming)applyIncomingSettings(String(incoming));
         }).catch(() => {});
         loadSettings();
+        // 直开电商页面时账号校验可能晚于首屏；账号就绪后补读对应的本地工作区。
+        const accountBootstrapValid = pageSession?.guard() || (() => true);
+        void Promise.resolve(window.StudioPageState?.ready?.()).then(accountId => {
+            if(!accountBootstrapValid() || !accountId || shouldIgnoreIncomingSettings()) return;
+            let scoped = '';
+            try { scoped = localStorage.getItem(`${SETTINGS_KEY}:account:${accountId}`) || ''; } catch(error) {}
+            if(scoped) applyIncomingSettings(scoped);
+        }).catch(() => {});
         restoreWorkspace(state.operation);
         window.EcommerceBatchOutfit?.hydrate?.(state.batchOutfit);
         state.settingsNeedsMigration = false;

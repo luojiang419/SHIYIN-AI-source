@@ -3,39 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>自由换衣 · 四步真实页面演示</title>
-  <style>
-    :root{color-scheme:dark;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#151515;color:#f5f3ef}
-    *{box-sizing:border-box}html,body{height:100%;overflow:hidden}body{margin:0;padding:clamp(12px,2vw,24px)}
-    main{width:100%;height:100%;min-height:0;max-width:1640px;margin:auto;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:12px}
-    nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;min-width:0}
-    nav button{border:1px solid #373737;background:#222;color:#eee;border-radius:12px;padding:14px;cursor:pointer;font:inherit;text-align:left}
-    nav button.active{border-color:#a66d38;background:#332719}nav button b{color:#c98f59;margin-right:8px}
-    figure{min-height:0;min-width:0;margin:0;border:1px solid #343434;border-radius:20px;overflow:hidden;display:grid;grid-template-rows:minmax(0,1fr) auto;background:#202020;box-shadow:0 24px 70px #0007}
-    .preview-scroll{min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
-    figure img{display:block;width:100%;height:auto}figcaption{border-top:1px solid #343434;padding:12px 18px;color:#c9c5bf;font-size:13px}
-    footer{font-size:12px;color:#8f8d89;line-height:1.45}
-    @media(max-width:700px){nav{grid-template-columns:repeat(2,minmax(0,1fr))}nav button{padding:11px}footer{font-size:11px}}
-  </style>
+  <title>正在打开自由换衣页面</title>
 </head>
 <body>
-  <main>
-    <nav id="steps" aria-label="演示步骤"></nav>
-    <figure><div id="previewScroll" class="preview-scroll" tabindex="0" aria-label="步骤截图，可在此区域滚动查看"><img id="preview" alt="自由换衣步骤截图"></div><figcaption id="caption"></figcaption></figure>
-    <footer>演示素材为生成的虚构参考图。第 4 步提示词由真实分析接口返回；隔离环境未配置图片生成 API，因此没有把试穿结果或指南图伪装成已生成。</footer>
-  </main>
+  <p>正在打开电商专用 · 自由换衣演示。<a id="openDemo" href="http://127.0.0.1:8766/demo/tryon?step=1">点击这里手动打开</a></p>
   <script>
-    const steps=[
-      {name:'人物',file:'01-人物.png',caption:'上传人物全身参考图，确定身份、体型和肤色。完成后解锁服饰步骤。'},
-      {name:'服饰',file:'02-服饰.png',caption:'上装、下装和鞋靴分别上传；右侧搭配托盘同步显示已选服饰。'},
-      {name:'调整',file:'03-调整.png',caption:'补充动作参考与面料局部，并把面料细节归属到对应上装。'},
-      {name:'生成',file:'04-生成.png',caption:'实际调用分析接口，按参考图角色生成可审阅的提示词；下方可补充生成需求。'}
-    ];
-    let current=Math.max(0,Math.min(3,Number(new URLSearchParams(location.search).get('step')||1)-1));
-    const nav=document.getElementById('steps'),img=document.getElementById('preview'),caption=document.getElementById('caption'),previewScroll=document.getElementById('previewScroll');
-    function show(index){current=Math.max(0,Math.min(steps.length-1,index));const item=steps[current];previewScroll.scrollTop=0;previewScroll.scrollLeft=0;img.src=encodeURI(item.file);img.alt=`第 ${current+1} 步：${item.name}`;caption.textContent=`0${current+1} ${item.name} · ${item.caption}`;nav.innerHTML=steps.map((step,i)=>`<button type="button" data-index="${i}" class="${i===current?'active':''}" aria-current="${i===current?'step':'false'}"><b>0${i+1}</b>${step.name}</button>`).join('');history.replaceState(null,'',`?step=${current+1}`)}
-    nav.addEventListener('click',event=>{const button=event.target.closest('[data-index]');if(button)show(Number(button.dataset.index))});
-    document.addEventListener('keydown',event=>{if(event.key==='ArrowLeft')show(current-1);if(event.key==='ArrowRight')show(current+1)});show(current);
+    const value = Number(new URLSearchParams(location.search).get('step') || 1);
+    const step = Number.isFinite(value) ? Math.max(1, Math.min(4, Math.trunc(value))) : 1;
+    const target = `http://127.0.0.1:8766/demo/tryon?step=${step}`;
+    document.getElementById('openDemo').href = target;
+    location.replace(target);
   </script>
 </body>
 </html>

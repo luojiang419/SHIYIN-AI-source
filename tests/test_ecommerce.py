@@ -1170,7 +1170,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(request_body["images"], [])
         self.assertEqual(request_body["aspectRatio"], "1:1")
         self.assertEqual(request_body["imageSize"], "1K")
-        self.assertEqual(request_body["replyType"], "json")
+        self.assertEqual(request_body["replyType"], "async")
 
     def test_local_vision_url_auto_completion(self):
         cases = {

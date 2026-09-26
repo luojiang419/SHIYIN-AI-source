@@ -8128,6 +8128,14 @@ def image_task_fail_reason(payload):
     return task_data.get("fail_reason") or task_data.get("message") or error.get("message") or (payload.get("message") if isinstance(payload, dict) else "") or "生图任务失败"
 
 async def fetch_image_task_payload(client, task_id, provider=None):
+    if is_grsai_provider(provider):
+        response = await client.get(
+            grsai_endpoint_url(provider, "/v1/api/result"),
+            headers=api_headers(provider=provider),
+            params={"id": task_id},
+        )
+        response.raise_for_status()
+        return response.json()
     task_url = image_task_url_for_provider(provider, task_id)
     response = await client.get(task_url, headers=api_headers(provider=provider))
     response.raise_for_status()
@@ -11510,18 +11518,11 @@ def grsai_task_id(raw):
     return str(raw.get("task_id") or raw.get("id") or "").strip()
 
 async def wait_for_grsai_image_task(client, provider, task_id):
-    query_url = grsai_endpoint_url(provider, "/v1/api/result")
     deadline = time.monotonic() + IMAGE_TASK_TIMEOUT
     last_payload = None
     while time.monotonic() < deadline:
         await asyncio.sleep(IMAGE_POLL_INTERVAL)
-        response = await client.get(
-            query_url,
-            headers=api_headers(provider=provider),
-            params={"id": task_id},
-        )
-        response.raise_for_status()
-        raw = response.json()
+        raw = await fetch_image_task_payload(client, task_id, provider)
         last_payload = raw
         status = grsai_status(raw)
         if status == "succeeded":
@@ -11535,7 +11536,7 @@ async def wait_for_grsai_image_task(client, provider, task_id):
             pass
     raise HTTPException(status_code=504, detail=f"Grsai 生图任务超时：{last_payload or task_id}")
 
-async def generate_grsai_nano_provider_image(prompt, size, model, reference_images=None, provider=None):
+async def generate_grsai_provider_image(prompt, size, quality, model, reference_images=None, provider=None):
     endpoint = grsai_endpoint_url(provider, "/v1/api/generate")
     body = {
         "model": model,
@@ -11545,11 +11546,16 @@ async def generate_grsai_nano_provider_image(prompt, size, model, reference_imag
             for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
             if ref.get("url")
         ],
-        "aspectRatio": grsai_aspect_ratio(size),
-        "imageSize": grsai_image_size(size),
-        "replyType": "json",
+        "replyType": "async",
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)) as client:
+    if is_grsai_nano_model(model):
+        body["aspectRatio"] = grsai_aspect_ratio(size)
+        body["imageSize"] = grsai_image_size(size)
+    else:
+        # Grsai 的 GPT-Image-2 原生接口使用像素尺寸，不能用 Nano Banana 的比例/分辨率字段。
+        body["aspectRatio"] = size or "1024x1024"
+        body["quality"] = quality if quality in {"low", "medium", "high"} else "auto"
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=180.0, write=120.0, pool=20.0)) as client:
         response = await client.post(endpoint, headers=api_headers(provider=provider), json=body)
         response.raise_for_status()
         raw = response.json()
@@ -11562,8 +11568,20 @@ async def generate_grsai_nano_provider_image(prompt, size, model, reference_imag
             task_id = grsai_task_id(raw)
             if not task_id:
                 raise
-        task_result = await wait_for_grsai_image_task(client, provider, task_id)
-        return extract_image(task_result), task_result
+        try:
+            task_result = await wait_for_grsai_image_task(client, provider, task_id)
+        except Exception as exc:
+            setattr(exc, "upstream_task_id", task_id)
+            raise
+        try:
+            return extract_image(task_result), task_result
+        except HTTPException as exc:
+            setattr(exc, "upstream_task_id", task_id)
+            raise
+
+
+async def generate_grsai_nano_provider_image(prompt, size, model, reference_images=None, provider=None):
+    return await generate_grsai_provider_image(prompt, size, "", model, reference_images, provider)
 
 VOLCENGINE_MIN_PIXELS = 3_686_400
 VOLCENGINE_MIN_EDGE = 1536
@@ -13015,8 +13033,8 @@ async def generate_ai_image(
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
-    if is_grsai_provider(provider) and is_grsai_nano_model(model):
-        return await generate_grsai_nano_provider_image(prompt, size, model, reference_images, provider)
+    if is_grsai_provider(provider) and (is_grsai_nano_model(model) or is_gpt_image_2_model(model)):
+        return await generate_grsai_provider_image(prompt, size, quality, model, reference_images, provider)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
@@ -17444,7 +17462,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "model": model,
         "provider_id": provider["id"],
         "provider_name": provider.get("name") or provider["id"],
-        "task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
+        "task_id": (grsai_task_id(raw) if is_grsai_provider(provider) else extract_task_id(raw)) if isinstance(raw, dict) else None,
         "request_id": raw.get("id") if isinstance(raw, dict) else None,
         "generation_started_at": generation_started_at,
         "generation_completed_at": generation_completed_at,

@@ -57,7 +57,10 @@ const asset = name => path.join(assetDir,name);
             return file;
         };
 
-        await upload('.ec-tryon-slot-card.is-model','model.png');
+        await page.locator('[data-add-tryon-model]').click();
+        await page.locator('#fileInput').setInputFiles(asset('model.png'));
+        await page.locator('.ec-tryon-model-select img').waitFor({timeout:30000});
+        await page.waitForFunction(() => Boolean(document.querySelector('.ec-tryon-model-select img')?.complete && document.querySelector('.ec-tryon-model-select img')?.naturalWidth),null,{timeout:30000});
         const screenshots = [await capture(1,'model')];
         await page.locator('[data-tryon-step-next]').click();
         await upload('[data-tryon-wardrobe-role="upper_garment"]','blazer.png');

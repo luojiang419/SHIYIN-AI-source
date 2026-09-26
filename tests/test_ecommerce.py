@@ -896,15 +896,19 @@ class EcommerceContractTests(unittest.TestCase):
     def test_pose_transfer_supplemental_views_are_same_style_evidence_only(self):
         references = [
             {"role": "source_view_2", "url": "/assets/input/side.jpg", "name": "B款侧面"},
+            {"role": "fabric_detail", "url": "/assets/input/weave.jpg", "name": "B款裤脚织纹"},
             {"role": "pose", "url": "/assets/input/a.jpg"},
             {"role": "source", "url": "/assets/input/b.jpg"},
             {"role": "source_view_1", "url": "/assets/input/oblique.jpg", "name": "B款正侧"},
         ]
         ordered = validate_input_roles("pose_transfer", references, {"pose_source": "reference"})
-        self.assertEqual([item["role"] for item in ordered], ["source", "pose", "source_view_1", "source_view_2"])
+        self.assertEqual([item["role"] for item in ordered], ["source", "pose", "source_view_1", "source_view_2", "fabric_detail"])
         prompt = build_prompt("pose_transfer", references, {"pose_source": "reference"})
         self.assertIn("Image 3 = [SAME GARMENT / SUPPLEMENTAL VIEW 1 ONLY]", prompt)
         self.assertIn("Image 4 = [SAME GARMENT / SUPPLEMENTAL VIEW 2 ONLY]", prompt)
+        self.assertIn("Image 5 = [SAME GARMENT / LOCAL FABRIC AND CONSTRUCTION DETAIL ONLY]", prompt)
+        self.assertIn("LOCAL SAME-SKU DETAIL: Image 5", prompt)
+        self.assertIn("primary source owns overall cut, silhouette and color", prompt)
         self.assertIn("Map the correct physical left/right side", prompt)
         self.assertIn("Do not copy a supplemental model's pose", prompt)
         import main
@@ -912,6 +916,12 @@ class EcommerceContractTests(unittest.TestCase):
             main.gemini_reference_part({"role": "source_view_1", "url": "/assets/input/oblique.jpg"})
         self.assertEqual(encode.call_args.kwargs, {"max_size": 3072, "lossless": False})
         self.assertIn("同一款服装", main.gemini_reference_role_text({"role": "source_view_1"}, 3))
+        self.assertIn("局部细节特写", main.gemini_reference_role_text({"role": "fabric_detail", "pose_transfer_detail": True}, 5))
+
+    def test_pose_transfer_detail_follows_pose_without_optional_views(self):
+        refs = [{"role":"fabric_detail","url":"/detail"}, {"role":"source","url":"/b"}, {"role":"pose","url":"/a"}]
+        prompt = build_prompt("pose_transfer", refs, {"pose_source":"reference"})
+        self.assertIn("LOCAL SAME-SKU DETAIL: Image 3", prompt)
 
     def test_universal_auto_instruction_chooses_prop_interactions(self):
         references = [

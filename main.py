@@ -11838,6 +11838,8 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
     contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
     if role == "source" and (ref or {}).get("garment_design_owner") is True:
         contract = "这是动作迁移的最终人物和完整服装原型。裤型、膝下到脚口的宽度变化、斜向拼缝、洗水、牛仔织纹和鞋均以此图为准；动作图只提供姿态与构图，不提供裤腿轮廓或服装设计。"
+    elif role == "fabric_detail" and (ref or {}).get("pose_transfer_detail") is True:
+        contract = "这是主图同款服装的局部细节特写，只补充真实织纹、纱线尺度、走线密度及可定位的拼缝、口袋或脚口结构。主图继续决定整衣版型与颜色；细节图不能提供姿势、人物、机位、背景，不能将局部线迹复制到其他部位。"
     elif (ref or {}).get("reference_id") == "universal_pose_anchor":
         contract = "这是最终照片的唯一编辑底图。保留整个人物身份、头部与身体朝向、关节、交叠肢体、脚的位置、场景和构图，只编辑指定商品及其必要轮廓区域，绝不能根据商品穿着者转身或重新构图。"
     elif role == "control_map" and (ref or {}).get("reference_id") == "derived_pose_depth":
@@ -17294,7 +17296,7 @@ def ecommerce_fabric_reference_urls(operation: str, references: List[Any], conte
     roles = {
         'pose_replicate': ('fabric_detail', 'target_image'),
         'try_on': ('detail', 'garment', 'upper_garment', 'lower_garment', 'full_garment'),
-        'pose_transfer': ('source',),
+        'pose_transfer': ('fabric_detail', 'source'),
         'universal': ('detail', 'full_garment', 'upper_garment', 'lower_garment', 'garment'),
     }.get(str(operation or ''), ())
     explicit = context.get('fabric_reference_urls')
@@ -17308,6 +17310,16 @@ def ecommerce_fabric_reference_urls(operation: str, references: List[Any], conte
             if role in ('fabric_detail', 'target_image') and url:
                 owned.setdefault(role, url)
         selected = owned.get('fabric_detail') or owned.get('target_image')
+        return [selected] if selected else list(dict.fromkeys(urls))[:1]
+    if operation == 'pose_transfer':
+        # 和批量换款一致：同款细节优先，整衣只作为缺少细节时的纹理来源。
+        owned = {}
+        for ref in references or []:
+            role = str(ref.get('role') or '') if isinstance(ref, dict) else str(getattr(ref, 'role', '') or '')
+            url = str(ref.get('url') or '') if isinstance(ref, dict) else str(getattr(ref, 'url', '') or '')
+            if role in ('fabric_detail', 'source') and url:
+                owned.setdefault(role, url)
+        selected = owned.get('fabric_detail') or owned.get('source')
         return [selected] if selected else list(dict.fromkeys(urls))[:1]
     if operation == 'universal':
         # 与批量换款相同：局部面料证据属于具体商品。已绑定细节时不再叠加
@@ -20803,7 +20815,9 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
         prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
         if snapshot["operation"] == "pose_transfer":
             prepared_refs = [
-                {**ref, "garment_design_owner": True} if (ref.get("role") or ref.get("reference_type")) == "source" else ref
+                {**ref, "garment_design_owner": True} if (ref.get("role") or ref.get("reference_type")) == "source"
+                else {**ref, "pose_transfer_detail": True} if (ref.get("role") or ref.get("reference_type")) == "fabric_detail"
+                else ref
                 for ref in prepared_refs
             ]
         snapshot["pose_depth"] = pose_depth

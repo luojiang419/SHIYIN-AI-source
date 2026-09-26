@@ -137,6 +137,8 @@
         "ecommerce.poseSupplementalViewOne": { zh:"同款补充视角 1（正侧/侧面）", en:"Same-style view 1 (three-quarter/side)" },
         "ecommerce.poseSupplementalViewTwo": { zh:"同款补充视角 2（可选）", en:"Same-style view 2 (optional)" },
         "ecommerce.poseSupplementalViewHint": { zh:"可追加最多两张同款实拍视角补足侧缝、后袋与裤脚结构；补充图不改变动作、人物或背景。", en:"Add up to two views of the same garment for real side seams, back pockets, and hems. These views do not control pose, person, or background." },
+        "ecommerce.poseFabricDetail": { zh:"同款细节参考（可选 · 面料/缝线/脚口）", en:"Same-style detail (optional · fabric/seam/hem)" },
+        "ecommerce.poseFabricDetailHint": { zh:"可上传一张同款局部特写；只补充真实织纹与对应部位工艺，版型和颜色仍以保留款原图为准。", en:"Add one close-up of the same garment for weave and local construction. The source image still controls cut and color." },
         "ecommerce.poseImage": { zh:"动作参考图", en:"Pose Reference" },
         "ecommerce.sourceImage": { zh:"原始图片", en:"Source Image" },
         "ecommerce.propImage": { zh:"新道具图片", en:"New Prop Image" },

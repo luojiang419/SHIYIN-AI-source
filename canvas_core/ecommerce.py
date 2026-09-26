@@ -126,7 +126,8 @@ UNIVERSAL_PRODUCT_ROLES = {
 }
 UNIVERSAL_GARMENT_ROLES = {"upper_garment", "lower_garment", "full_garment"}
 POSE_TRANSFER_VIEW_ROLES = ("source_view_1", "source_view_2")
-ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", *POSE_TRANSFER_VIEW_ROLES, *UNIVERSAL_REFERENCE_ROLE_IDS}
+POSE_TRANSFER_DETAIL_ROLE = "fabric_detail"
+ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", POSE_TRANSFER_DETAIL_ROLE, *POSE_TRANSFER_VIEW_ROLES, *UNIVERSAL_REFERENCE_ROLE_IDS}
 TRY_ON_OUTFIT_ROLES = {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}
 TRY_ON_REFERENCE_ROLES = {"source", "model_identity", *TRY_ON_OUTFIT_ROLES, "detail", "pose"}
 UNIVERSAL_INTERACTIONS = {"wear", "put_on", "hold", "carry", "place", "use", "pose", "scene", "style", "identity"}
@@ -854,7 +855,7 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         return plan["inputs"]
     normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
     if operation == "pose_transfer":
-        order = {role: index for index, role in enumerate(("source", "pose", *POSE_TRANSFER_VIEW_ROLES))}
+        order = {role: index for index, role in enumerate(("source", "pose", *POSE_TRANSFER_VIEW_ROLES, POSE_TRANSFER_DETAIL_ROLE))}
         normalized.sort(key=lambda item: order.get(item["role"], len(order)))
     roles = {item["role"] for item in normalized}
     required = set(OPERATION_INPUTS[operation])
@@ -1082,6 +1083,7 @@ def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
         "source": "SOURCE / EDIT BASE",
         "source_view_1": "SAME GARMENT / SUPPLEMENTAL VIEW 1 ONLY",
         "source_view_2": "SAME GARMENT / SUPPLEMENTAL VIEW 2 ONLY",
+        "fabric_detail": "SAME GARMENT / LOCAL FABRIC AND CONSTRUCTION DETAIL ONLY",
         "subject": "MODEL SUBJECT / BODY / FALLBACK POSE",
         "garment": "GARMENT PRODUCT SOURCE",
         "model_identity": "MODEL FACE IDENTITY ONLY",
@@ -1864,6 +1866,13 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
         )
     elif operation == "pose_transfer":
+        detail_index = next((index for index, item in enumerate(normalized, 1) if item["role"] == POSE_TRANSFER_DETAIL_ROLE), 0)
+        detail_lock = (
+            f"LOCAL SAME-SKU DETAIL: Image {detail_index} is a close-up of the primary source garment. "
+            "Use its visible weave, yarn scale, stitch density, wash transitions, and identifiable seam, pocket or hem construction only at the matching garment location. "
+            "The primary source owns overall cut, silhouette and color; the close-up must not enlarge the weave into a garment-wide print, duplicate a local seam elsewhere, or change pose, person, camera or background. "
+            if detail_index else ""
+        )
         supplemental_views = [
             f"Image {index} ({item.get('name') or item['role']})"
             for index, item in enumerate(normalized, 1) if item["role"] in POSE_TRANSFER_VIEW_ROLES
@@ -1883,7 +1892,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             "Drape the source garment around the new body pose with its original ease and construction: if the source trousers flare below the knee, retain the knee-to-hem widening and a visibly wider bell-shaped hem even when the pose reference wears narrow trousers. "
             "Keep any source diagonal thigh panel seam continuous and in its original anatomical location; do not turn it into a generic side seam, erase it, or paint it onto the opposite leg. "
             "Preserve real denim weave, wash gradients, stitching, hem thickness, and folds at close inspection without borrowing fabric texture from the pose image. "
-            + view_lock
+            + view_lock + detail_lock
         )
         if str(options.get("pose_source") or "preset") == "reference":
             target = (

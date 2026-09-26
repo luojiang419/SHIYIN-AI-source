@@ -70,6 +70,7 @@
                 {role:'pose', labelKey:'ecommerce.poseImage', required:false},
                 {role:'source_view_1', labelKey:'ecommerce.poseSupplementalViewOne', required:false},
                 {role:'source_view_2', labelKey:'ecommerce.poseSupplementalViewTwo', required:false},
+                {role:'fabric_detail', labelKey:'ecommerce.poseFabricDetail', required:false},
             ],
         },
     };
@@ -2020,7 +2021,7 @@
                 <label class="ec-tryon-message-box"><span><b>${escapeHtml(t('ecommerce.tryOnDialogTitle'))}</b><small>${escapeHtml(t('ecommerce.tryOnDialogHint'))}</small></span><div class="ec-tryon-message-compose"><textarea data-option="instruction" maxlength="1000" placeholder="${escapeHtml(t('ecommerce.extraInstructionHint'))}">${escapeHtml(options.instruction || '')}</textarea><div id="tryOnMessageActionSlot" class="ec-tryon-message-action-slot"></div></div></label>
             </section>`;
         } else if(state.operation === 'pose_transfer') {
-            html = `<div class="ec-field"><span>${escapeHtml(t('ecommerce.poseTransferOwnership'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseSupplementalViewHint'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseSource'))}</span><div class="ec-chip-grid">
+            html = `<div class="ec-field"><span>${escapeHtml(t('ecommerce.poseTransferOwnership'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseSupplementalViewHint'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseFabricDetailHint'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseSource'))}</span><div class="ec-chip-grid">
                 <button type="button" data-option-button="pose_source" data-value="reference" class="${options.pose_source === 'reference' ? 'active':''}">${escapeHtml(t('ecommerce.uploadPose'))}</button>
                 <button type="button" data-option-button="pose_source" data-value="preset" class="${options.pose_source === 'preset' ? 'active':''}">${escapeHtml(t('ecommerce.posePreset'))}</button>
             </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.posePreset'))}</span><div id="posePresetGrid" class="ec-chip-grid">${presetButtons('pose_presets', options.pose_preset)}</div></div>${instructionHtml(options.instruction)}`;

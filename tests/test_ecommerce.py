@@ -2511,7 +2511,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("if(tryOnSlotHasUserContent(item.role)) visible.push(item)", self.javascript)
         self.assertIn("function addTryOnReferenceSlot()", self.javascript)
         self.assertIn("data-add-tryon-reference", self.javascript)
-        self.assertIn("visibleWardrobe.map(tryOnWardrobeCard)", self.javascript)
+        self.assertIn("const numberedOutfitCards = outfitCards.map", self.javascript)
         self.assertIn(".ec-tryon-add-reference", self.css)
 
     def test_try_on_reference_slots_support_stacked_candidates(self):
@@ -2592,7 +2592,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
             "function tryOnReorderedPreviewOrder(draggedRole, targetRole)",
             "function updateTryOnDragPreview(draggedRole, targetRole)",
             "clearTryOnDragPreview()",
-            "visibleWardrobe.map(tryOnWardrobeCard)",
+            "outfitCards.map((item,index) => tryOnWardrobeCard(item,String(index + 2).padStart(2,'0')))",
             "orderedWardrobe.forEach(item => entries.push([item.role, state.inputs[item.role]]))",
             "data-tryon-reference-type",
             "data-reference-type-inline",

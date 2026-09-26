@@ -20,10 +20,15 @@ const asset = name => path.join(assetDir,name);
     const browser = await chromium.launch({headless:true,channel:'chrome'});
     try {
         const context = await browser.newContext({viewport:{width:1580,height:1250},deviceScaleFactor:1,acceptDownloads:true});
-        const account = `tryondemo${Date.now()}`;
-        const password = `Demo-${crypto.randomUUID()}-A9!`;
+        const account = process.env.TRYON_DEMO_ACCOUNT || `tryondemo${Date.now()}`;
+        const password = process.env.TRYON_DEMO_PASSWORD || `Demo-${crypto.randomUUID()}-A9!`;
         const registration = await context.request.post(`${baseUrl}/api/account/register`,{data:{account,password}});
-        assert.equal(registration.status(),201,`演示账号注册失败：${registration.status()} ${await registration.text()}`);
+        if(registration.status() === 409 && process.env.TRYON_DEMO_ACCOUNT) {
+            const login = await context.request.post(`${baseUrl}/api/account/login`,{data:{account,password}});
+            assert.equal(login.status(),200,`演示账号登录失败：${login.status()} ${await login.text()}`);
+        } else {
+            assert.equal(registration.status(),201,`演示账号注册失败：${registration.status()} ${await registration.text()}`);
+        }
         const page = await context.newPage();
         await page.addInitScript(() => localStorage.setItem('studio_theme','dark'));
         const calls = [];
@@ -85,6 +90,7 @@ const asset = name => path.join(assetDir,name);
         assert.ok(calls.some(item=>item.path==='/api/ecommerce/analyze'&&item.status===200));
         const promptText = await page.locator('[data-tryon-plan-result]').textContent();
         fs.writeFileSync(path.join(outputDir,'verification.json'),JSON.stringify({baseUrl,uploads:6,analysisHttpStatus:200,promptLength:promptText.length,screenshots},null,2));
+        await page.waitForTimeout(900);
         console.log(`四步真实页面演示通过：${screenshots.join(', ')}`);
     } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

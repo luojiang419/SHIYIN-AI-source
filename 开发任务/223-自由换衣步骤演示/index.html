@@ -7,10 +7,7 @@
   <style>
     :root{color-scheme:dark;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#151515;color:#f5f3ef}
     *{box-sizing:border-box}html,body{height:100%;overflow:hidden}body{margin:0;padding:clamp(12px,2vw,24px)}
-    main{width:100%;height:100%;min-height:0;max-width:1640px;margin:auto;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;gap:12px}
-    header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;min-width:0}
-    small{color:#b6a486;font-size:12px;font-weight:800;letter-spacing:.18em}h1{margin:8px 0;font-size:28px}
-    p{color:#a9a6a1;line-height:1.6;margin:0}.badge{border:1px solid #514735;border-radius:99px;padding:8px 12px;color:#dbbe92;font-size:12px;white-space:nowrap}
+    main{width:100%;height:100%;min-height:0;max-width:1640px;margin:auto;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:12px}
     nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;min-width:0}
     nav button{border:1px solid #373737;background:#222;color:#eee;border-radius:12px;padding:14px;cursor:pointer;font:inherit;text-align:left}
     nav button.active{border-color:#a66d38;background:#332719}nav button b{color:#c98f59;margin-right:8px}
@@ -18,12 +15,11 @@
     .preview-scroll{min-height:0;min-width:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
     figure img{display:block;width:100%;height:auto}figcaption{border-top:1px solid #343434;padding:12px 18px;color:#c9c5bf;font-size:13px}
     footer{font-size:12px;color:#8f8d89;line-height:1.45}
-    @media(max-width:700px){header{display:block}h1{font-size:21px}.badge{display:inline-block;margin-top:8px}nav{grid-template-columns:repeat(2,minmax(0,1fr))}nav button{padding:11px}footer{font-size:11px}}
+    @media(max-width:700px){nav{grid-template-columns:repeat(2,minmax(0,1fr))}nav button{padding:11px}footer{font-size:11px}}
   </style>
 </head>
 <body>
   <main>
-    <header><div><small>SHIYIN AI / FREE TRY-ON</small><h1>自由换衣 · 四步真实页面演示</h1><p>依次查看人物、服饰、调整、生成。图片来自实际页面操作与本地后端上传、分析接口。</p></div><span class="badge">真实页面截图 · 非设计稿</span></header>
     <nav id="steps" aria-label="演示步骤"></nav>
     <figure><div id="previewScroll" class="preview-scroll" tabindex="0" aria-label="步骤截图，可在此区域滚动查看"><img id="preview" alt="自由换衣步骤截图"></div><figcaption id="caption"></figcaption></figure>
     <footer>演示素材为生成的虚构参考图。第 4 步提示词由真实分析接口返回；隔离环境未配置图片生成 API，因此没有把试穿结果或指南图伪装成已生成。</footer>

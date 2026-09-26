@@ -38,6 +38,16 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
                 return {page:element.scrollHeight-element.clientHeight,left:left?.scrollHeight-left?.clientHeight,right:right?.scrollHeight-right?.clientHeight};
             });
             assert.ok(scroll.page <= 1 && scroll.left <= 1 && scroll.right <= 1,`第 ${step} 步不应需要滚轮浏览其他区域：${JSON.stringify(scroll)}`);
+            const placement = await demo.locator('.ec-tryon-materials').evaluate(element => {
+                const material=element.getBoundingClientRect();
+                const stepbar=document.querySelector('.ec-tryon-stepbar').getBoundingClientRect();
+                const mount=document.querySelector('#controlInputMount').getBoundingClientRect();
+                const grid=element.querySelector('.ec-tryon-closet-grid')?.getBoundingClientRect();
+                const last=element.querySelector('.ec-tryon-closet-grid > .ec-tryon-slot-card:last-child')?.getBoundingClientRect();
+                return {above:material.top-stepbar.bottom,below:mount.bottom-material.bottom,gridCenter:grid ? (grid.left+grid.right)/2 : 0,lastCenter:last ? (last.left+last.right)/2 : 0};
+            });
+            assert.ok(Math.abs(placement.above-placement.below-12) <= 24,`第 ${step} 步操作区应在导航下方居中：${JSON.stringify(placement)}`);
+            if(step === 2) assert.ok(Math.abs(placement.gridCenter-placement.lastCenter) <= 2,'单独一件鞋靴应在末行居中');
             await context.close();
         }
         console.log('real e-commerce try-on demo entry passed');

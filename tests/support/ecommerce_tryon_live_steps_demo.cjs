@@ -41,12 +41,16 @@ const asset = name => path.join(assetDir,name);
         await page.locator('.ec-tryon-stepbar button').first().waitFor();
         const upload = async (cardSelector,fileName) => {
             await page.locator(`${cardSelector} .ec-upload-slot`).click();
+            const activeImage = page.locator(`${cardSelector} .ec-tryon-active-card img`).first();
+            const oldSrc = await activeImage.count() ? await activeImage.getAttribute('src') : '';
+            const responsePromise = page.waitForResponse(response => new URL(response.url()).pathname === '/api/ai/upload' && response.request().method() === 'POST',{timeout:30000});
             await page.locator('#fileInput').setInputFiles(asset(fileName));
-            await page.locator(`${cardSelector} .ec-upload-preview img`).first().waitFor({timeout:30000});
-            await page.waitForFunction(selector => {
-                const card = document.querySelector(selector);
-                return card && !card.querySelector('.uploading,[data-uploading="true"]') && card.querySelector('.ec-upload-preview img')?.complete;
-            },cardSelector,{timeout:30000});
+            const uploaded = (await (await responsePromise).json()).files?.[0]?.url;
+            assert.ok(uploaded,`上传未返回图片：${fileName}`);
+            await page.waitForFunction(({selector,previous}) => {
+                const image = document.querySelector(`${selector} .ec-tryon-active-card img`);
+                return image?.getAttribute('src') && image.getAttribute('src') !== previous && image.complete;
+            },{selector:cardSelector,previous:oldSrc},{timeout:30000});
         };
         const capture = async (number,label) => {
             await page.evaluate(() => {const mount=document.querySelector('#controlInputMount');if(mount)mount.scrollTop=0;});
@@ -57,15 +61,19 @@ const asset = name => path.join(assetDir,name);
             return file;
         };
 
-        await page.locator('[data-add-tryon-model]').click();
+        await page.locator('.ec-tryon-slot-card.is-empty-model .ec-upload-slot').click();
+        const previousModels = await page.locator('.ec-tryon-model-select img').count();
+        const modelUpload = page.waitForResponse(response => new URL(response.url()).pathname === '/api/ai/upload' && response.request().method() === 'POST',{timeout:30000});
         await page.locator('#fileInput').setInputFiles(asset('model.png'));
-        await page.locator('.ec-tryon-model-select img').waitFor({timeout:30000});
+        const modelUrl = (await (await modelUpload).json()).files?.[0]?.url;
+        assert.ok(modelUrl,'模特上传未返回图片');
+        await page.locator('.ec-tryon-model-select img').nth(previousModels).waitFor({timeout:30000});
         await page.waitForFunction(() => Boolean(document.querySelector('.ec-tryon-model-select img')?.complete && document.querySelector('.ec-tryon-model-select img')?.naturalWidth),null,{timeout:30000});
         const screenshots = [await capture(1,'model')];
         await page.locator('[data-tryon-step-next]').click();
         await upload('[data-tryon-wardrobe-role="upper_garment"]','blazer.png');
         await upload('[data-tryon-wardrobe-role="lower_garment"]','trousers.png');
-        await page.locator('[data-add-tryon-reference]').click();
+        await page.locator('[data-add-tryon-card="1"]').click();
         await upload('[data-tryon-wardrobe-role="shoes"]','loafers.png');
         screenshots.push(await capture(2,'outfit'));
 

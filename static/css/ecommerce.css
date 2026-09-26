@@ -1546,6 +1546,24 @@ html.studio-theme-dark body .ec-result-frame {
     font-size:15px;
 }
 .ec-tryon-slot-card.is-fabric-detail { min-height:306px; }
+.ec-tryon-slot-card.is-model,
+.ec-tryon-slot-card.is-outfit { grid-template-rows:30px minmax(0,1fr) 38px 28px; min-height:344px; }
+.ec-tryon-slot-card.is-fabric-detail { grid-template-rows:30px minmax(0,1fr) 38px 38px 28px; min-height:382px; }
+.ec-tryon-slot-card.is-outfit:has(.ec-detail-target) { grid-template-rows:30px minmax(0,1fr) 38px 38px 28px; min-height:382px; }
+.ec-tryon-slot-card.is-fabric-detail:not(:has(.ec-detail-target)) { grid-template-rows:30px minmax(0,1fr) 38px 28px; min-height:344px; }
+.ec-tryon-slot-card.is-add-reference { grid-template-rows:30px minmax(0,1fr) 38px; min-height:344px; }
+.ec-tryon-description { min-width:0; height:28px; display:flex; align-items:center; padding:0 9px; border:1px solid var(--ec-border); border-radius:9px; background:color-mix(in srgb,var(--ec-control) 78%,transparent); color:var(--ec-muted); text-align:left; cursor:text; font-size:10px; }
+.ec-tryon-description span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.ec-tryon-description input { width:100%; min-width:0; height:24px; padding:0 4px; border:0; outline:0; background:transparent; color:var(--ec-text); font:inherit; }
+.ec-tryon-add-card { width:100%; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; border:1px dashed var(--ec-border-strong); border-radius:20px; background:color-mix(in srgb,var(--ec-panel-soft) 62%,transparent); color:var(--ec-text); cursor:pointer; }
+.ec-tryon-add-card:hover { border-color:var(--ec-accent); background:var(--ec-control); }
+.ec-tryon-add-card > span { font-size:30px; line-height:1; }
+.ec-tryon-add-card strong { font-size:12px; }
+.ec-tryon-add-card small,
+.ec-tryon-add-card-footer { color:var(--ec-muted); font-size:10px; }
+.ec-tryon-add-card-footer { display:flex; align-items:center; justify-content:center; min-width:0; border:1px solid var(--ec-border); border-radius:13px; background:var(--ec-control); }
+.ec-tryon-remove-slot { width:26px; height:24px; flex:0 0 auto; display:grid; place-items:center; padding:0; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-control); color:var(--ec-muted); font-size:15px; line-height:1; cursor:pointer; }
+.ec-tryon-remove-slot:hover { border-color:var(--ec-accent); color:var(--ec-text); }
 .ec-tryon-slot-card.is-fabric-detail .ec-detail-target { padding:0 2px; }
 .ec-tryon-add-reference {
     min-height:44px;

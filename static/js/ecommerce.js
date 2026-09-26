@@ -90,6 +90,8 @@
     const TRY_ON_POSE_ROLE = {role:'pose', labelKey:'ecommerce.poseImage', stageKey:'ecommerce.tryOnPoseStage', number:'07'};
     const TRY_ON_WARDROBE_ROLES = [...TRY_ON_OUTFIT_ROLES, TRY_ON_POSE_ROLE];
     const TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT = 3;
+    const TRY_ON_EXTRA_SLOT_LIMIT = 8;
+    const TRY_ON_MODEL_PENDING_LIMIT = 8;
     const TRY_ON_PREVIEW_LAYER_ORDER = ['full_garment','upper_garment','lower_garment','shoes','accessory','garment'];
     const TRY_ON_REQUEST_ROLES = ['model_identity', ...TRY_ON_PREVIEW_LAYER_ORDER, 'detail', 'pose'];
     const TRY_ON_MULTI_REFERENCE_ROLES = ['source', ...TRY_ON_REQUEST_ROLES];
@@ -97,7 +99,7 @@
 
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:'', generation_style:'standard_product'},
-        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, studio_reference:'', guide_step:0, guide_task_id:''},
+        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, extra_slots:[], next_extra_slot_id:1, model_pending_cards:[], next_model_pending_id:1, studio_reference:'', guide_step:0, guide_task_id:''},
         batch_outfit:{},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
     };
@@ -129,6 +131,7 @@
         tasks:[],
         selectedOutput:0,
         activeUploadRole:'',
+        activeUploadModelIndex:-1,
         compareValue:50,
         zoom:1,
         tasksById:new Map(),
@@ -279,6 +282,10 @@
             upload_token:String(value.upload_token || ''),
             upload_error:String(value.upload_error || ''),
             name:String(value.name || ''),
+            custom_type_label:String(value.custom_type_label || ''),
+            label:String(value.label || ''),
+            instruction:String(value.instruction || ''),
+            slot_type:String(value.slot_type || ''),
             kind:'image',
             mime:String(value.mime || ''),
             width:Number(value.width || 0),
@@ -321,6 +328,7 @@
             slot_type:String(value.slot_type || ''),
             custom_type_label:String(value.custom_type_label || ''),
             label:String(value.label || ''), instruction:String(value.instruction || ''), order:Number(value.order || 0),
+            detail_target_id:String(value.detail_target_id || ''),
             original_url:String(value.original_url || value.url || ''), original_name:String(value.original_name || value.name || ''),
             original_width:Number(value.original_width || value.width || 0), original_height:Number(value.original_height || value.height || 0),
             crop_history:cleanCropHistory(value.crop_history),
@@ -1123,11 +1131,28 @@
     }
 
     function tryOnInputConfig(role){
-        return currentConfig().inputs.find(input => input.role === role) || TRY_ON_WARDROBE_ROLES.find(item => item.role === role);
+        return currentConfig().inputs.find(input => input.role === role) || TRY_ON_WARDROBE_ROLES.find(item => item.role === role)
+            || [...tryOnExtraItems(1), ...tryOnExtraItems(2)].find(item => item.role === role);
+    }
+
+    function tryOnExtraSlots(step){
+        const saved = currentOptions().extra_slots;
+        if(!Array.isArray(saved)) return [];
+        return saved.filter(item => item && /^tryon_extra_\d+$/.test(String(item.id || '')) && [1,2].includes(Number(item.step)) && (step === undefined || Number(item.step) === step)).slice(0, TRY_ON_EXTRA_SLOT_LIMIT);
+    }
+
+    function tryOnExtraItems(step){
+        return tryOnExtraSlots(step).map((item,index) => ({
+            role:item.id,
+            labelKey:step === 1 ? 'ecommerce.refAccessory' : 'ecommerce.refDetail',
+            stageKey:step === 1 ? 'ecommerce.tryOnAccessoryStage' : 'ecommerce.refDetail',
+            number:String((step === 1 ? 7 : 9) + index).padStart(2,'0'),
+            extra:true,
+        }));
     }
 
     function tryOnOutfitEntries(){
-        const entries = orderedTryOnWardrobeRoles()
+        const entries = [...orderedTryOnWardrobeRoles(), ...tryOnExtraItems(1)]
             .filter(item => TRY_ON_OUTFIT_ROLES.some(base => base.role === tryOnRequestRoleForSlot(item.role, state.inputs[item.role])))
             .map(item => [item.role, state.inputs[item.role], item]);
         if(state.inputs.garment?.url && !entries.some(([,asset]) => asset?.url)) {
@@ -1185,11 +1210,26 @@
     function addTryOnReferenceSlot(){
         const ordered = orderedTryOnWardrobeRoles();
         const visibleRoles = new Set(visibleTryOnWardrobeRoles().map(item => item.role));
-        const nextIndex = ordered.findIndex(item => !visibleRoles.has(item.role));
-        if(nextIndex < 0) return false;
-        currentOptions().visible_slot_count = Math.max(Number(currentOptions().visible_slot_count) || 0, nextIndex + 1);
+        const nextIndex = ordered.findIndex(item => item.role !== 'pose' && !visibleRoles.has(item.role));
+        if(nextIndex >= 0) currentOptions().visible_slot_count = Math.max(Number(currentOptions().visible_slot_count) || 0, nextIndex + 1);
+        else if(!addTryOnExtraSlot(1)) return false;
         renderInputs();
         persistSettings();
+        return true;
+    }
+
+    function addTryOnExtraSlot(step){
+        const existing = tryOnExtraSlots();
+        if(existing.length >= TRY_ON_EXTRA_SLOT_LIMIT) return false;
+        const options = currentOptions();
+        let nextId = Math.max(1, Number(options.next_extra_slot_id) || 1);
+        while(existing.some(item => item.id === `tryon_extra_${nextId}`)) nextId += 1;
+        const id = `tryon_extra_${nextId}`;
+        options.extra_slots = [...existing, {id,step}];
+        options.next_extra_slot_id = nextId + 1;
+        const defaultRole = step === 1 ? 'accessory' : 'detail';
+        state.inputs[id] = {role:defaultRole, reference_type:defaultRole, reference_id:id, slot_type:defaultSlotTypeIdForRole(defaultRole), custom_type_label:'', label:'', instruction:'', url:''};
+        state.tryOnPromptPreview = null;
         return true;
     }
 
@@ -1199,7 +1239,9 @@
         const visibleOutfit = orderedWardrobe.some(item => state.inputs[item.role]?.url);
         if(state.inputs.garment?.url && !visibleOutfit) entries.push(['garment', state.inputs.garment]);
         orderedWardrobe.forEach(item => entries.push([item.role, state.inputs[item.role]]));
+        tryOnExtraItems(1).forEach(item => entries.push([item.role, state.inputs[item.role]]));
         entries.push(['detail', state.inputs.detail]);
+        tryOnExtraItems(2).forEach(item => entries.push([item.role, state.inputs[item.role]]));
         return entries;
     }
 
@@ -1232,7 +1274,7 @@
     }
 
     function isTryOnReferenceRole(role){
-        return TRY_ON_MULTI_REFERENCE_ROLES.includes(String(role || ''));
+        return TRY_ON_MULTI_REFERENCE_ROLES.includes(String(role || '')) || /^tryon_extra_\d+$/.test(String(role || ''));
     }
 
     function tryOnReferenceCandidates(item){
@@ -1260,7 +1302,7 @@
     function buildTryOnInput(role, base={}, candidates=[], selectedIndex=0){
         const safeIndex = Math.max(0, Math.min(candidates.length - 1, Number(selectedIndex) || 0));
         const selected = candidates[safeIndex] || {};
-        const slotType = base.slot_type || selected.slot_type || defaultSlotTypeIdForRole(role);
+        const slotType = role === 'source' ? (selected.slot_type || defaultSlotTypeIdForRole(role)) : (base.slot_type || selected.slot_type || defaultSlotTypeIdForRole(role));
         const slotMeta = referenceSlotTypeById(slotType);
         return {
             ...base,
@@ -1269,9 +1311,9 @@
             reference_id:base.reference_id || role,
             reference_type:slotMeta?.role || base.reference_type || (role === 'source' ? 'subject' : role),
             slot_type:slotMeta?.id || slotType,
-            custom_type_label:base.custom_type_label || selected.custom_type_label || '',
-            label:base.label || '',
-            instruction:base.instruction || '',
+            custom_type_label:role === 'source' ? (selected.custom_type_label || '') : (base.custom_type_label || selected.custom_type_label || ''),
+            label:role === 'source' ? (selected.label || '') : (base.label || ''),
+            instruction:role === 'source' ? (selected.instruction || '') : (base.instruction || ''),
             alternates:candidates,
             selected_index:safeIndex,
         };
@@ -1391,29 +1433,41 @@
         return `<label class="ec-reference-type-row ec-tryon-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected, context:'try_on', fallbackRole:role, item, dataAttr:'data-tryon-reference-type', dataValue:role, disabled:Boolean(disabled)})}</label>`;
     }
 
+    function tryOnDescriptionRow(role, item=state.inputs[role] || {}, modelIndex=''){
+        const attr = modelIndex === '' ? `data-tryon-description-role="${escapeHtml(role)}"` : `data-tryon-model-description="${modelIndex}"`;
+        return `<button type="button" class="ec-tryon-description" ${attr} title="双击编辑描述" aria-label="双击编辑参考描述"><span>${escapeHtml(String(item.instruction || '').trim() || '双击添加描述，供 AI 助手读取')}</span></button>`;
+    }
+
+    function tryOnAddCardHtml(step, number){
+        const name = step === 1 ? '服饰' : '调整参考';
+        return `<div class="ec-tryon-slot-card is-add-reference"><div class="ec-tryon-card-kicker"><b>${escapeHtml(number)}</b><span>添加${name}</span></div><button type="button" class="ec-tryon-add-card" data-add-tryon-card="${step}" aria-label="添加${name}上传卡"><span aria-hidden="true">＋</span><strong>添加${name}</strong><small>新增一张上传卡</small></button><div class="ec-tryon-add-card-footer">点击后选择类型并上传图片</div></div>`;
+    }
+
     function tryOnWardrobeCard(item){
         const input = tryOnInputConfig(item.role) || item;
         const kickerLabel = tryOnSlotKickerLabel(input, item.stageKey);
         return `<div class="ec-tryon-slot-card is-outfit" data-tryon-wardrobe-role="${escapeHtml(item.role)}" data-tryon-sort-role="${escapeHtml(item.role)}">
-            <div class="ec-tryon-card-kicker"><b>${escapeHtml(item.number)}</b><span>${escapeHtml(kickerLabel)}</span><button type="button" class="ec-tryon-drag-handle" draggable="true" data-tryon-drag-handle="${escapeHtml(item.role)}" title="${escapeHtml(t('ecommerce.dragReorder'))}" aria-label="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</button></div>
+            <div class="ec-tryon-card-kicker"><b>${escapeHtml(item.number)}</b><span>${escapeHtml(kickerLabel)}</span>${item.extra ? `<button type="button" class="ec-tryon-remove-slot" data-remove-tryon-extra="${escapeHtml(item.role)}" title="删除此卡片" aria-label="删除此卡片">×</button>` : `<button type="button" class="ec-tryon-drag-handle" draggable="true" data-tryon-drag-handle="${escapeHtml(item.role)}" title="${escapeHtml(t('ecommerce.dragReorder'))}" aria-label="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</button>`}</div>
             ${inputSlotHtml(input)}
             ${tryOnReferenceTypeRow(item.role)}
+            ${item.extra && tryOnRequestRoleForSlot(item.role, state.inputs[item.role]) === 'detail' ? tryOnFabricDetailTargetHtml(item.role) : ''}
+            ${tryOnDescriptionRow(item.role)}
         </div>`;
     }
 
-    function tryOnFabricDetailTargetHtml(){
-        const detail = state.inputs.detail || {};
-        const products = tryOnInputEntriesForRequest().filter(([role, item]) => role !== 'source' && role !== 'pose' && role !== 'detail' && item?.url);
+    function tryOnFabricDetailTargetHtml(role='detail'){
+        const detail = state.inputs[role] || {};
+        const products = tryOnInputEntriesForRequest().filter(([slotRole, item]) => item?.url && TRY_ON_OUTFIT_ROLES.some(type => type.role === tryOnRequestRoleForSlot(slotRole, item)));
         if(!products.length) return '<div class="ec-detail-target is-error"><b>面料细节归属</b><span>请先上传需要换上的服装。</span></div>';
         const explicit = String(detail.detail_target_id || '');
         const selected = explicit || (products.length === 1 ? products[0][1].reference_id || products[0][0] : '');
         const options = products.map(([role,item]) => `<option value="${escapeHtml(item.reference_id || role)}" ${String(item.reference_id || role) === selected ? 'selected':''}>${escapeHtml(tryOnSlotDisplayLabel(tryOnInputConfig(role) || {role}, item))}</option>`).join('');
-        return `<label class="ec-detail-target"><b>面料细节归属</b><select data-tryon-detail-target><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
+        return `<label class="ec-detail-target"><b>面料细节归属</b><select data-tryon-detail-target="${escapeHtml(role)}"><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
     }
 
     function tryOnFabricDetailCard(){
         const input = tryOnInputConfig('detail') || {role:'detail', labelKey:'ecommerce.refDetail', required:false};
-        return `<div class="ec-tryon-slot-card is-fabric-detail"><div class="ec-tryon-card-kicker"><b>纹理</b><span>面料细节（可选）</span></div>${inputSlotHtml(input)}${tryOnFabricDetailTargetHtml()}</div>`;
+        return `<div class="ec-tryon-slot-card is-fabric-detail"><div class="ec-tryon-card-kicker"><b>纹理</b><span>面料细节（可选）</span></div>${inputSlotHtml(input)}${tryOnReferenceTypeRow('detail')}${tryOnRequestRoleForSlot('detail',state.inputs.detail) === 'detail' ? tryOnFabricDetailTargetHtml() : ''}${tryOnDescriptionRow('detail')}</div>`;
     }
 
     function tryOnReorderedPreviewOrder(draggedRole, targetRole){
@@ -1465,7 +1519,23 @@
     }
 
     function bindTryOnSlotControls(){
-        el.inputSlots.querySelector('[data-add-tryon-reference]')?.addEventListener('click', addTryOnReferenceSlot);
+        el.inputSlots.querySelectorAll('[data-remove-tryon-extra]').forEach(button => button.addEventListener('click', () => {
+            const id = button.dataset.removeTryonExtra || '';
+            const existing = state.inputs[id];
+            revokeInputPreviewUrls(existing);
+            delete state.inputs[id];
+            currentOptions().extra_slots = tryOnExtraSlots().filter(item => item.id !== id);
+            state.tryOnPromptPreview = null;
+            renderInputs();
+            persistSettings();
+            validateForm(false);
+        }));
+        el.inputSlots.querySelectorAll('[data-add-tryon-card]').forEach(button => button.addEventListener('click', () => {
+            const step = Number(button.dataset.addTryonCard);
+            const added = step === 1 ? addTryOnReferenceSlot() : addTryOnExtraSlot(2);
+            if(!added) return showToast('本次试穿的参考卡片已达到上限', true);
+            if(step === 2) { renderInputs(); persistSettings(); }
+        }));
         el.inputSlots.querySelectorAll('[data-tryon-reference-type]').forEach(select => {
             const role = select.dataset.tryonReferenceType || '';
             bindReferenceTypeInlineControls(select, () => {
@@ -1476,6 +1546,7 @@
                 }
                 return state.inputs[role];
             }, role, () => {
+                state.tryOnPromptPreview = null;
                 renderInputs();
                 validateForm(false);
                 persistSettings();
@@ -1491,6 +1562,7 @@
                     instruction:existing.instruction || '',
                     ...existing,
                 }, select.value, role);
+                state.tryOnPromptPreview = null;
                 renderInputs();
                 validateForm(false);
                 persistSettings();
@@ -1537,27 +1609,38 @@
         const sourceReady = Boolean(state.inputs.source?.url);
         const modelCandidates = tryOnReferenceCandidates(state.inputs.source);
         const selectedModelIndex = tryOnSelectedReferenceIndex(state.inputs.source, modelCandidates);
+        const pendingModelCards = tryOnPendingModelCards();
+        const emptyModelCount = pendingModelCards.length;
+        const modelTypeRow = (item,index) => `<label class="ec-reference-type-row ec-tryon-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected:selectedSlotTypeId(item,'source'), context:'try_on', fallbackRole:'source', item, dataAttr:'data-tryon-model-type', dataValue:String(index)})}</label>`;
         const modelCards = modelCandidates.map((candidate, index) => `<div class="ec-tryon-slot-card is-model ${index === selectedModelIndex ? 'is-active' : ''}">
-            <div class="ec-tryon-card-kicker"><b>${String(index + 1).padStart(2,'0')}</b><span>模特 ${index + 1}</span></div>
+            <div class="ec-tryon-card-kicker"><b>${String(index + 1).padStart(2,'0')}</b><span>模特 ${index + 1}${index === selectedModelIndex ? ' · 当前' : ''}</span></div>
             <div class="ec-tryon-model-photo">
                 <button type="button" class="ec-tryon-model-select" data-tryon-model-index="${index}" aria-pressed="${index === selectedModelIndex}" aria-label="选择模特 ${index + 1}" ${candidate.url ? '' : 'disabled'}><img src="${escapeHtml(referenceDisplayUrl(candidate))}" alt="模特 ${index + 1}"></button>
                 <div class="ec-tryon-model-tools"><button type="button" data-tryon-model-preview="${index}" ${candidate.url ? '' : 'disabled'}>查看</button><button type="button" data-tryon-model-remove="${index}">删除</button></div>
             </div>
-            <div class="ec-tryon-model-caption" title="${escapeHtml(candidate.upload_error || candidate.name || '')}"><strong>${index === selectedModelIndex ? '当前模特' : '点击卡片选用'}</strong><span>${escapeHtml(candidate.uploading ? '上传中…' : candidate.upload_error || formatName(candidate.name || '人物参考图'))}</span></div>
+            ${modelTypeRow(candidate,index)}
+            ${tryOnDescriptionRow('source',candidate,index)}
         </div>`).join('');
-        const addModelCard = `<div class="ec-tryon-slot-card is-model is-add-model">
-            <div class="ec-tryon-card-kicker"><b>${String(modelCandidates.length + 1).padStart(2,'0')}</b><span>添加模特</span></div>
-            <button type="button" class="ec-upload-slot ec-tryon-add-model-tile" data-role="source" data-add-tryon-model aria-label="添加模特，可一次选择多张图片"><span aria-hidden="true">＋</span><strong>添加模特</strong><small>可一次选择多张图片</small></button>
-            <div class="ec-tryon-model-caption"><strong>人物参考</strong><span>拖放、粘贴或点击上传</span></div>
+        const emptyModelCards = pendingModelCards.map((pendingModel,offset) => `<div class="ec-tryon-slot-card is-model is-empty-model">
+            <div class="ec-tryon-card-kicker"><b>${String(modelCandidates.length + offset + 1).padStart(2,'0')}</b><span>选择模特图片</span>${modelCandidates.length || pendingModelCards.length > 1 ? `<button type="button" class="ec-tryon-remove-slot" data-remove-pending-model="${offset}" title="删除空卡片" aria-label="删除空卡片">×</button>` : ''}</div>
+            <article class="ec-upload-slot" data-role="source" data-tryon-model-empty-index="${offset}"><div class="ec-upload-empty" data-action="upload" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"></path></svg><small>${escapeHtml(t('ecommerce.dropOrChoose'))}</small></div></article>
+            ${modelTypeRow(pendingModel,`empty_${offset}`)}
+            ${tryOnDescriptionRow('source',pendingModel,`empty_${offset}`)}
+        </div>`).join('');
+        const addModelCard = `<div class="ec-tryon-slot-card is-add-reference is-add-model">
+            <div class="ec-tryon-card-kicker"><b>${String(modelCandidates.length + emptyModelCount + 1).padStart(2,'0')}</b><span>添加模特</span></div>
+            <button type="button" class="ec-tryon-add-card" data-add-tryon-model aria-label="添加模特上传卡"><span aria-hidden="true">＋</span><strong>添加模特</strong><small>新增一张上传卡</small></button>
+            <div class="ec-tryon-add-card-footer">先添加卡片，再选择图片</div>
         </div>`;
         const outfitCount = tryOnOutfitCount();
         const requestedStep = Math.max(0, Math.min(3, Number(currentOptions().guide_step) || 0));
         const step = !sourceReady ? 0 : !outfitCount ? Math.min(requestedStep,1) : requestedStep;
         currentOptions().guide_step = step;
         const visibleWardrobe = visibleTryOnWardrobeRoles().filter(item => item.role !== 'pose');
-        const visibleReferenceCount = 1 + visibleWardrobe.length;
-        const referenceLimit = 1 + TRY_ON_WARDROBE_ROLES.length;
-        const canAddReference = visibleWardrobe.length < TRY_ON_OUTFIT_ROLES.length;
+        const extraOutfit = tryOnExtraItems(1);
+        const extraTune = tryOnExtraItems(2);
+        const canAddReference = tryOnExtraSlots().length < TRY_ON_EXTRA_SLOT_LIMIT || visibleWardrobe.length < TRY_ON_OUTFIT_ROLES.length;
+        const canAddTune = tryOnExtraSlots().length < TRY_ON_EXTRA_SLOT_LIMIT;
         const completedVisibleReferences = Number(sourceReady) + visibleWardrobe.filter(item => state.inputs[item.role]?.url).length;
         const steps = [
             {number:'01', label:t('ecommerce.tryOnStepModel'), done:sourceReady},
@@ -1580,11 +1663,10 @@
                 <div class="ec-tryon-step-intro"><small>STEP ${step + 1} / 4</small><h3>${headlines[step][0]}</h3><p>${headlines[step][1]}</p></div>
                 <div class="ec-tryon-stage">
                     <div class="ec-tryon-reference-grid ec-tryon-closet-grid" aria-label="${escapeHtml(t('ecommerce.tryOnWardrobe'))}">
-                        ${step === 0 ? modelCards + addModelCard : ''}
-                        ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') : ''}
-                        ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') : ''}
+                        ${step === 0 ? modelCards + emptyModelCards + addModelCard : ''}
+                        ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') + extraOutfit.map(tryOnWardrobeCard).join('') + (canAddReference ? tryOnAddCardHtml(1,String(7 + extraOutfit.length).padStart(2,'0')) : '') : ''}
+                        ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') + extraTune.map(tryOnWardrobeCard).join('') + (canAddTune ? tryOnAddCardHtml(2,String(9 + extraTune.length).padStart(2,'0')) : '') : ''}
                     </div>
-                    ${step === 1 && canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
                     ${step === 3 ? `<div class="ec-tryon-prompt-plan"><div><strong>自动提示词</strong><span>参考图 ${taskInputsForRequest().length} 张 · 可在下方补充生成需求</span></div><button type="button" data-tryon-plan-prompt>${prompt ? '重新规划' : '自动规划提示词'}</button><p data-tryon-plan-status>${prompt ? escapeHtml(prompt.message || '规划完成') : '点击后调用视觉分析 API，生成可审阅的最终提示词。'}</p><pre data-tryon-plan-result>${escapeHtml(prompt?.prompt_preview || '尚未规划。生成时系统仍会自动组合角色和服饰约束。')}</pre></div>` : ''}
                 </div>
                 <div class="ec-tryon-step-actions" aria-label="步骤导航">
@@ -1593,10 +1675,39 @@
                 </div>
             </div>
         </section>`;
-        el.inputProgress.textContent = step === 0 ? `${modelCandidates.filter(item => item.url).length} 位模特` : step === 1 ? `${visibleWardrobe.filter(item => state.inputs[item.role]?.url).length}/${visibleWardrobe.length}` : `${completedVisibleReferences}/${visibleReferenceCount}`;
+        el.inputProgress.textContent = step === 0 ? `${modelCandidates.filter(item => item.url).length} 位模特` : step === 1 ? `${[...visibleWardrobe,...extraOutfit].filter(item => state.inputs[item.role]?.url).length}/${visibleWardrobe.length + extraOutfit.length}` : `${completedVisibleReferences + extraTune.filter(item => state.inputs[item.role]?.url).length} 张参考`;
         bindInputSlots();
         bindTryOnSlotControls();
-        el.inputSlots.querySelector('[data-add-tryon-model]')?.addEventListener('click', () => openFilePicker('source'));
+        el.inputSlots.querySelector('[data-add-tryon-model]')?.addEventListener('click', () => {
+            const cards = tryOnPendingModelCards();
+            if(cards.length >= TRY_ON_MODEL_PENDING_LIMIT) return showToast('空模特卡片已达到上限', true);
+            const id = `pending_${Number(currentOptions().next_model_pending_id) || 1}`;
+            currentOptions().next_model_pending_id = (Number(currentOptions().next_model_pending_id) || 1) + 1;
+            currentOptions().model_pending_cards = [...cards,{id,custom_type_label:'',instruction:''}];
+            renderInputs();
+            persistSettings();
+        });
+        el.inputSlots.querySelectorAll('[data-remove-pending-model]').forEach(button => button.addEventListener('click', () => {
+            const cards = tryOnPendingModelCards();
+            cards.splice(Number(button.dataset.removePendingModel) || 0,1);
+            renderInputs();
+            persistSettings();
+        }));
+        el.inputSlots.querySelectorAll('[data-tryon-model-type]').forEach(select => {
+            const key = select.dataset.tryonModelType || '';
+            const pending = key.startsWith('empty_');
+            const index = Number(key);
+            const pendingItem = pending ? tryOnPendingModelCards()[Number(key.slice(6))] : null;
+            bindReferenceTypeInlineControls(select, () => pending ? pendingItem : state.inputs.source?.alternates?.[index], 'source', () => {
+                if(!pending) updateTryOnModelMetadata(index, {custom_type_label:state.inputs.source?.alternates?.[index]?.custom_type_label || ''});
+                state.tryOnPromptPreview = null;
+                renderInputs();
+                persistSettings();
+            });
+        });
+        el.inputSlots.querySelectorAll('[data-tryon-description-role],[data-tryon-model-description]').forEach(button => {
+            button.addEventListener('dblclick', () => beginTryOnDescriptionEdit(button));
+        });
         el.inputSlots.querySelectorAll('[data-tryon-model-index]').forEach(button => button.addEventListener('click', () => selectTryOnReference('source', Number(button.dataset.tryonModelIndex))));
         el.inputSlots.querySelectorAll('[data-tryon-model-preview]').forEach(button => button.addEventListener('click', () => {
             selectTryOnReference('source', Number(button.dataset.tryonModelPreview));
@@ -1609,18 +1720,87 @@
             validateForm(false);
             persistSettings();
         }));
-        el.inputSlots.querySelector('[data-tryon-detail-target]')?.addEventListener('change', event => {
-            state.inputs.detail = state.inputs.detail || {role:'detail', reference_type:'detail', reference_id:'detail'};
-            state.inputs.detail.detail_target_id = event.target.value;
+        el.inputSlots.querySelectorAll('[data-tryon-detail-target]').forEach(select => select.addEventListener('change', event => {
+            const role = event.target.dataset.tryonDetailTarget || 'detail';
+            state.inputs[role] = state.inputs[role] || {role:'detail', reference_type:'detail', reference_id:role};
+            state.inputs[role].detail_target_id = event.target.value;
+            state.tryOnPromptPreview = null;
             persistSettings();
             validateForm(false);
-        });
+        }));
         bindStudioReferenceControls();
         el.inputSlots.querySelectorAll('[data-tryon-step]').forEach(button => button.addEventListener('click', () => setTryOnStep(Number(button.dataset.tryonStep))));
         el.inputSlots.querySelector('[data-tryon-step-back]')?.addEventListener('click', () => setTryOnStep(step - 1));
         el.inputSlots.querySelector('[data-tryon-step-next]')?.addEventListener('click', () => setTryOnStep(step + 1));
         el.inputSlots.querySelector('[data-tryon-plan-prompt]')?.addEventListener('click', planTryOnPrompt);
         syncTryOnLookPreview();
+    }
+
+    function updateTryOnModelMetadata(index, patch){
+        const existing = state.inputs.source || {};
+        const candidates = tryOnReferenceCandidates(existing);
+        if(!candidates[index]) return false;
+        candidates[index] = {...candidates[index], ...patch};
+        state.inputs.source = buildTryOnInput('source', existing, candidates, tryOnSelectedReferenceIndex(existing, candidates));
+        return true;
+    }
+
+    function tryOnPendingModelCards(){
+        const options = currentOptions();
+        let cards = Array.isArray(options.model_pending_cards)
+            ? options.model_pending_cards.filter(item => item && typeof item === 'object').slice(0,TRY_ON_MODEL_PENDING_LIMIT)
+            : [];
+        if(!cards.length && options.model_pending_slot) {
+            cards = [{id:'legacy',custom_type_label:String(options.model_pending_type || ''),instruction:String(options.model_pending_instruction || '')}];
+        }
+        if(!cards.length && !tryOnReferenceCandidates(state.inputs.source).length) cards = [{id:'initial',custom_type_label:'',instruction:''}];
+        options.model_pending_cards = cards;
+        delete options.model_pending_slot;
+        delete options.model_pending_type;
+        delete options.model_pending_instruction;
+        return cards;
+    }
+
+    function beginTryOnDescriptionEdit(button){
+        if(button.classList.contains('is-editing')) return;
+        const modelKey = button.dataset.tryonModelDescription;
+        const role = button.dataset.tryonDescriptionRole || '';
+        const pending = modelKey?.startsWith('empty_');
+        const modelIndex = modelKey === undefined || pending ? -1 : Number(modelKey);
+        const pendingIndex = pending ? Number(modelKey.slice(6)) : -1;
+        const current = pending ? tryOnPendingModelCards()[pendingIndex]?.instruction : modelIndex >= 0 ? tryOnReferenceCandidates(state.inputs.source)[modelIndex]?.instruction : state.inputs[role]?.instruction;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = 300;
+        input.value = String(current || '');
+        input.setAttribute('aria-label','参考图描述');
+        button.classList.add('is-editing');
+        button.appendChild(input);
+        let done = false;
+        const finish = commit => {
+            if(done) return;
+            done = true;
+            if(commit){
+                const instruction = input.value.trim().slice(0,300);
+                if(pending && tryOnPendingModelCards()[pendingIndex]) tryOnPendingModelCards()[pendingIndex].instruction = instruction;
+                else if(modelIndex >= 0) updateTryOnModelMetadata(modelIndex,{instruction});
+                else {
+                    state.inputs[role] ||= {role,reference_type:role,reference_id:role};
+                    state.inputs[role].instruction = instruction;
+                }
+                state.tryOnPromptPreview = null;
+                persistSettings();
+            }
+            renderInputs();
+        };
+        input.addEventListener('click', event => event.stopPropagation());
+        input.addEventListener('keydown', event => {
+            if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
+            if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+        });
+        input.addEventListener('blur', () => finish(true));
+        input.focus();
+        input.select();
     }
 
     function setTryOnStep(next){
@@ -1650,7 +1830,7 @@
     }
 
     function tryOnPreviewItems(){
-        const items = orderedTryOnWardrobeRoles().slice();
+        const items = [...orderedTryOnWardrobeRoles(), ...tryOnExtraItems(1)];
         const hasStructuredOutfit = TRY_ON_OUTFIT_ROLES.some(item => state.inputs[item.role]?.url);
         if(state.inputs.garment?.url && !hasStructuredOutfit) {
             items.push({role:'garment', labelKey:'ecommerce.garmentImage', stageKey:'ecommerce.tryOnGarmentStage', number:'02'});
@@ -2104,7 +2284,10 @@
                     event.stopPropagation();
                     const action = button.dataset.action;
                     if(action === 'remove') removeInput(role);
-                    if(action === 'upload') openFilePicker(role);
+                    if(action === 'upload') {
+                        if(role === 'source' && slot.dataset.tryonModelEmptyIndex !== undefined) state.activeUploadModelIndex = Number(slot.dataset.tryonModelEmptyIndex);
+                        openFilePicker(role);
+                    }
                     if(action === 'assets') openAssetPicker(role);
                 });
             });
@@ -2147,6 +2330,7 @@
             empty?.addEventListener('keydown', event => {
                 if(event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
+                    if(role === 'source' && slot.dataset.tryonModelEmptyIndex !== undefined) state.activeUploadModelIndex = Number(slot.dataset.tryonModelEmptyIndex);
                     openFilePicker(role);
                 }
             });
@@ -2164,6 +2348,7 @@
                 const files = droppedFiles(event.dataTransfer);
                 if(!files.length) return;
                 event.stopPropagation();
+                if(role === 'source' && slot.dataset.tryonModelEmptyIndex !== undefined) state.activeUploadModelIndex = Number(slot.dataset.tryonModelEmptyIndex);
                 if(currentConfig()?.universal) handleDroppedUniversalFiles(files, role);
                 else if(state.operation === 'try_on' && isTryOnReferenceRole(role)) handleSelectedFiles(files, role);
                 else {
@@ -2605,6 +2790,14 @@
             const fallbackRole = state.operation === 'try_on' ? role : (existing.reference_type || existing.role || 'prop');
             applySlotTypeToInput(nextInput, selectedSlotTypeId(existing, fallbackRole), fallbackRole);
         }
+        if(state.operation === 'try_on' && role === 'source') {
+            const cards = tryOnPendingModelCards();
+            const index = Math.max(0, Math.min(cards.length - 1, Number(state.activeUploadModelIndex) || 0));
+            const pending = cards[index] || {};
+            nextInput.custom_type_label = String(pending.custom_type_label || '');
+            nextInput.instruction = String(pending.instruction || '');
+            nextInput.slot_type = defaultSlotTypeIdForRole('source');
+        }
         return nextInput;
     }
 
@@ -2616,6 +2809,14 @@
         if(state.operation === 'try_on' && isTryOnReferenceRole(pair.role)) {
             state.tryOnPromptPreview = null;
             setTryOnInputCandidate(pair.role, previewInput);
+            if(pair.role === 'source') {
+                const cards = tryOnPendingModelCards();
+                if(cards.length) {
+                    const index = Math.max(0, Math.min(cards.length - 1, Number(state.activeUploadModelIndex) || 0));
+                    cards.splice(index,1);
+                    state.activeUploadModelIndex = Math.min(index,cards.length - 1);
+                }
+            }
         }
         else {
             revokeInputPreviewUrls(state.inputs[pair.role]);

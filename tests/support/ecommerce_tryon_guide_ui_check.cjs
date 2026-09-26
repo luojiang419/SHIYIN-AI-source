@@ -48,6 +48,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.equal(modelLayout.count,4,'三位模特和添加卡片应直接平铺在操作区');
         assert.ok(modelLayout.maxRight <= modelLayout.viewport, '模特卡片应完整显示在工作台内');
         assert.ok(modelLayout.maxBottom <= modelLayout.height, '添加模特卡片应和其他模特在首屏完整显示');
+        assert.equal(await page.locator('[data-tryon-step-back]').count(),0);
+        const firstArrow = await page.locator('.ec-tryon-materials').evaluate(element => {
+            const card = element.querySelector('.ec-tryon-slot-card.is-model:last-child').getBoundingClientRect();
+            const arrow = element.querySelector('[data-tryon-step-next]').getBoundingClientRect();
+            return {clear:arrow.left >= card.right - 1,round:getComputedStyle(element.querySelector('[data-tryon-step-next]')).borderRadius};
+        });
+        assert.ok(firstArrow.clear,'右侧箭头不应遮挡添加模特卡');
+        assert.equal(firstArrow.round,'50%');
         await page.screenshot({path:'.codex-tmp/ecommerce-tryon-multiple-models.png'});
         await page.locator('[data-tryon-model-remove="2"]').click();
         assert.equal(await page.locator('[data-tryon-model-index]').count(),2);
@@ -55,6 +63,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const remainingModelUrl = await page.locator('.ec-tryon-model-select[aria-pressed="true"] img').getAttribute('src');
         await page.locator('[data-tryon-step-next]').click();
         assert.equal(await page.locator('.ec-tryon-slot-card.is-model').count(),0);
+        assert.equal(await page.locator('[data-tryon-step-back]').count(),1);
+        assert.equal(await page.locator('[data-tryon-step-next]').count(),1);
         await page.locator('[data-tryon-step-back]').click();
         assert.equal(await page.locator('[data-tryon-model-index]').count(),2);
         assert.equal(await page.locator('.ec-tryon-model-select[aria-pressed="true"] img').getAttribute('src'),remainingModelUrl);
@@ -66,6 +76,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.equal(await page.locator('.ec-tryon-slot-card.is-fabric-detail').count(),1);
         await page.locator('[data-tryon-step-next]').click();
         await page.locator('[data-tryon-plan-prompt]').click();
+        assert.equal(await page.locator('[data-tryon-step-next]').count(),0);
+        assert.equal(await page.locator('[data-tryon-step-back]').count(),1);
         await page.locator('[data-tryon-plan-result]').getByText('人物身份锁定；保留上装材质和颜色；完成真实试穿。').waitFor();
         const analyzeCall = calls.find(item => item.path === '/api/ecommerce/analyze');
         assert.equal(analyzeCall.body.inputs.filter(item => item.role === 'source').length,1);
@@ -90,6 +102,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.setViewportSize({width:520,height:900});
         const narrowCards = await page.locator('.ec-tryon-closet-grid').evaluate(element => [...element.querySelectorAll(':scope > .ec-tryon-slot-card')].every(card => card.getBoundingClientRect().right <= innerWidth));
         assert.ok(narrowCards,'窄屏模特卡片不应超出视口');
+        const narrowArrow = await page.locator('.ec-tryon-materials').evaluate(element => ({
+            cardBottom:element.querySelector('.ec-tryon-slot-card.is-add-model').getBoundingClientRect().bottom,
+            arrowTop:element.querySelector('[data-tryon-step-next]').getBoundingClientRect().top,
+        }));
+        assert.ok(narrowArrow.arrowTop >= narrowArrow.cardBottom,'窄屏箭头应在卡片下方，避免遮挡上传');
+        await page.locator('[data-tryon-step-next]').scrollIntoViewIfNeeded();
         await page.screenshot({path:'.codex-tmp/ecommerce-tryon-model-cards-narrow.png',fullPage:true});
         await page.locator('.ec-tryon-stepbar [data-tryon-step="1"]').click();
         const columns = await page.locator('.ec-tryon-closet-grid').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);

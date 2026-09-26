@@ -2444,12 +2444,12 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
 .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,
 .ec-page.is-try-on[data-tryon-step="2"] .ec-tryon-closet-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
-.ec-tryon-step-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:8px; }
+.ec-tryon-step-actions { position:absolute; z-index:3; top:50%; left:10px; right:10px; display:flex; justify-content:space-between; align-items:center; height:50px; transform:translateY(-50%); pointer-events:none; }
 /* 步骤栏留在顶部，每步的专业操作区在剩余工作台空间居中。 */
 .ec-page.is-try-on .ec-input-module,
 .ec-page.is-try-on .ec-input-slots,
 .ec-page.is-try-on .ec-tryon-studio { height:100%; min-height:0; }
-.ec-page.is-try-on .ec-tryon-materials { align-self:safe center; width:100%; }
+.ec-page.is-try-on .ec-tryon-materials { position:relative; align-self:safe center; width:100%; padding-inline:64px; }
 .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-materials { max-width:960px; justify-self:center; }
 .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid { justify-content:center; }
 .ec-tryon-model-photo { position:relative; min-height:0; overflow:hidden; border:1px solid var(--ec-border-strong); border-radius:20px; background:var(--ec-panel); box-shadow:var(--ec-tryon-shadow-card); }
@@ -2480,6 +2480,13 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
     background:var(--ec-control); color:var(--ec-text); font-size:11px; font-weight:800; cursor:pointer;
 }
 .ec-tryon-step-actions button.is-primary, .ec-tryon-prompt-plan button, .ec-tryon-guide-head button { background:var(--ec-text); color:var(--ec-panel); border-color:var(--ec-text); }
+.ec-page.is-try-on .ec-tryon-step-actions button { width:50px; height:50px; min-height:50px; display:grid; place-items:center; padding:0; border:1px solid var(--ec-border-strong); border-radius:50%; background:linear-gradient(145deg,color-mix(in srgb,var(--ec-panel-raised) 94%,transparent),color-mix(in srgb,var(--ec-control) 88%,transparent)); color:var(--ec-text); box-shadow:0 12px 28px rgba(0,0,0,.18),inset 0 1px 0 color-mix(in srgb,var(--ec-text) 10%,transparent); backdrop-filter:blur(14px); pointer-events:auto; transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease; }
+.ec-page.is-try-on .ec-tryon-step-actions button.is-next { margin-left:auto; background:var(--ec-text); color:var(--ec-panel); }
+.ec-page.is-try-on .ec-tryon-step-actions button:hover { border-color:var(--ec-accent); box-shadow:0 15px 32px rgba(0,0,0,.22),0 0 0 3px color-mix(in srgb,var(--ec-accent) 16%,transparent); }
+.ec-page.is-try-on .ec-tryon-step-actions button.is-back:hover { transform:translateX(-3px); }
+.ec-page.is-try-on .ec-tryon-step-actions button.is-next:hover { transform:translateX(3px); }
+.ec-page.is-try-on .ec-tryon-step-actions button:focus-visible { outline:2px solid var(--ec-accent); outline-offset:3px; }
+.ec-tryon-step-actions svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .ec-tryon-prompt-plan { display:grid; gap:12px; padding:18px; border:1px solid var(--ec-border); border-radius:18px; background:var(--ec-control); }
 .ec-tryon-prompt-plan button { justify-self:start; }
 .ec-tryon-prompt-plan > div { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -2507,6 +2514,8 @@ html.studio-theme-dark .ec-tryon-look-item.is-selected {
     .ec-page.is-try-on .ec-result-panel { min-height:680px; }
 }
 @media (max-width:560px) {
+    .ec-page.is-try-on .ec-tryon-materials { padding-inline:16px; padding-bottom:76px; }
+    .ec-tryon-step-actions { top:auto; bottom:12px; transform:none; }
     .ec-page.is-try-on[data-tryon-step="0"] .ec-tryon-closet-grid,
     .ec-page.is-try-on[data-tryon-step="1"] .ec-tryon-closet-grid,
     .ec-page.is-try-on[data-tryon-step="2"] .ec-tryon-closet-grid { grid-template-columns:1fr; }

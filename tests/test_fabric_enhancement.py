@@ -96,6 +96,17 @@ def test_universal_texture_reuses_bound_detail_without_double_overlay():
     assert main.ecommerce_fabric_reference_urls('universal', refs) == ['/pants-detail', '/shirt']
 
 
+def test_try_on_uses_each_garments_bound_detail_once():
+    refs = [
+        {'role':'source', 'reference_id':'model', 'url':'/model'},
+        {'role':'upper_garment', 'reference_id':'blazer', 'url':'/blazer'},
+        {'role':'lower_garment', 'reference_id':'pants', 'url':'/pants'},
+        {'role':'shoes', 'reference_id':'loafers', 'url':'/loafers'},
+        {'role':'detail', 'detail_target_id':'pants', 'url':'/pants-detail'},
+    ]
+    assert main.ecommerce_fabric_reference_urls('try_on', refs) == ['/blazer', '/pants-detail']
+
+
 def test_universal_legacy_single_product_detail_and_other_pages_are_preserved():
     refs = [{'role':'lower_garment','url':'/pants'}, {'role':'detail','url':'/detail'}]
     assert main.ecommerce_fabric_reference_urls('universal', refs) == ['/detail']

@@ -17339,9 +17339,9 @@ def ecommerce_fabric_reference_urls(operation: str, references: List[Any], conte
                 owned.setdefault(role, url)
         selected = owned.get('fabric_detail') or owned.get('source')
         return [selected] if selected else list(dict.fromkeys(urls))[:1]
-    if operation == 'universal':
-        # 与批量换款相同：局部面料证据属于具体商品。已绑定细节时不再叠加
-        # 同一件整衣的另一层纹理，也不能把其他商品的参考当成它的细节。
+    if operation in {'universal', 'try_on'}:
+        # 局部面料证据属于具体服装。已绑定细节时不再叠加同一件整衣的
+        # 另一层纹理，也不能把其他服装的参考当成它的细节。
         items = [ref for ref in references or [] if isinstance(ref, dict)]
         products = [ref for ref in items if (ref.get('reference_type') or ref.get('role')) in roles and (ref.get('reference_type') or ref.get('role')) != 'detail']
         for product in products:

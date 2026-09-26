@@ -99,7 +99,7 @@
 
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:'', generation_style:'standard_product'},
-        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, extra_slots:[], next_extra_slot_id:1, model_pending_cards:[], next_model_pending_id:1, studio_reference:'', guide_step:0, guide_task_id:'', guide_style:'editorial_model'},
+        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, extra_slots:[], next_extra_slot_id:1, model_pending_cards:[], next_model_pending_id:1, studio_reference:'', guide_step:0, guide_task_id:'', guide_source_task_id:'', guide_style:'editorial_model'},
         batch_outfit:{},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
     };
@@ -149,7 +149,7 @@
         referencePreview:{key:'', versions:[], selectedIndex:0, mode:'preview', ratio:'free', cropRect:{x:.05,y:.05,w:.9,h:.9}, drag:null},
         tryOnSwitches:{},
         tryOnPromptPreview:null,
-        tryOnGuide:{task:null, submitting:false, error:'', timer:null, view:'guide', compare:false},
+        tryOnGuide:{task:null, submitting:false, loading:false, error:'', timer:null, view:'guide', compare:false},
         compareViewer:null,
         viewportWidth:window.innerWidth,
         settingsNeedsMigration:false,
@@ -1948,13 +1948,17 @@
             resultBody.appendChild(panel);
         }
         const guide = state.tryOnGuide;
-        const task = guide.task;
+        const guideOwnerId = currentOptions().guide_source_task_id;
+        const guideOwnedByCurrentTask = !guideOwnerId || guideOwnerId === taskIdOf(state.currentTask);
+        const task = guideOwnedByCurrentTask ? guide.task : null;
+        const guideError = guideOwnedByCurrentTask ? guide.error : '';
         const image = task?.result?.images?.[0] || '';
-        const running = guide.submitting || ['queued','running'].includes(task?.status);
+        const waitingForTryOn = Boolean(guideOwnedByCurrentTask && guideOwnerId && !currentOptions().guide_task_id && !guide.submitting);
+        const running = waitingForTryOn || (guideOwnedByCurrentTask && guide.submitting) || ['queued','running'].includes(task?.status);
         const tryOnTask = state.currentTask;
         const tryOnImage = tryOnTask?.result?.images?.[state.selectedOutput] || '';
-        const hasResults = Boolean(tryOnTask || task || guide.submitting);
-        if(!image && (running || guide.error)) {
+        const hasResults = Boolean(tryOnTask || task || (guideOwnedByCurrentTask && guide.submitting));
+        if(!image && (running || guideError)) {
             if(!status) {
                 status = document.createElement('span');
                 status.id = 'tryOnGuideStatus';
@@ -1962,7 +1966,7 @@
                 status.setAttribute('role','status');
                 resultHead.insertBefore(status, el.compareReset);
             }
-            status.textContent = guide.error || '搭配卡生成中…';
+            status.textContent = guideError || (waitingForTryOn ? '换衣图完成后生成搭配卡…' : '搭配卡生成中…');
         } else status?.remove();
         const showingGuide = Boolean(image && guide.view !== 'tryon');
         const showingFinal = Boolean(!showingGuide && tryOnImage && !guide.compare);
@@ -2002,7 +2006,7 @@
         if(!hasResults) gallery?.remove();
         else {
             const works = [
-                ['guide','搭配卡',image,guide.error || (running ? '生成中' : '等待生成')],
+                ['guide','搭配卡',image,guideError || (waitingForTryOn ? '等待换衣图' : (running ? '生成中' : '等待生成'))],
                 ['tryon','最终换衣图',tryOnImage,tryOnTask?.status === 'failed' ? '生成失败' : (tryOnTask?.status === 'succeeded' ? '已完成' : '生成中')],
             ];
             gallery.innerHTML = works.map(([view,label,url,emptyText]) => `<button type="button" data-tryon-result-view="${view}" aria-pressed="${view === (showingGuide ? 'guide' : 'tryon')}" ${view === 'guide' && !url ? 'disabled' : ''}><span class="ec-tryon-gallery-thumb">${url ? `<img src="${escapeHtml(url)}" alt="">` : ''}</span><span class="ec-tryon-gallery-copy"><strong>${label}</strong><small>${url ? '点击查看大图' : escapeHtml(emptyText)}</small></span></button>`).join('');
@@ -2015,56 +2019,92 @@
             }));
         }
         panel.innerHTML = image ? `<div class="ec-tryon-guide-head"><div><small>OUTFIT CARD</small><h3>模特搭配卡</h3></div><label>导出格式 <select data-tryon-guide-format><option value="png">PNG</option><option value="jpeg">JPG</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div><div class="ec-tryon-guide-result"><img src="${escapeHtml(image)}" alt="AI 生成的模特搭配卡"></div>`
-            : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guide.error || (running ? '正在生成模特搭配卡…' : '等待开始生成。'))}</p>`;
+            : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guideError || (waitingForTryOn ? '换衣图完成后生成模特搭配卡…' : (running ? '正在生成模特搭配卡…' : '等待开始生成。')))}</p>`;
         panel.querySelector('[data-export-tryon-guide]')?.addEventListener('click', exportTryOnGuide);
-        if(!task && currentOptions().guide_task_id && !guide.loading) void pollTryOnGuide();
+        if(guideOwnedByCurrentTask && !task && (currentOptions().guide_task_id || guideOwnerId) && !guide.loading && !guide.submitting && !guide.timer && !guide.error) scheduleTryOnGuidePoll();
     }
 
-    async function generateTryOnGuide(style){
-        if(!tryOnReady() || state.tryOnGuide.submitting) return;
+    async function generateTryOnGuide(style, sourceTask){
+        if(state.tryOnGuide.submitting) return;
         const guide = state.tryOnGuide;
+        const ownerTaskId = taskIdOf(sourceTask);
+        if(state.options.try_on?.guide_source_task_id !== ownerTaskId) return;
+        const finalImage = sourceTask?.result?.images?.[0] || '';
+        if(!finalImage) { guide.error = '换衣图没有可用成品，搭配卡未生成。'; syncTryOnGuidePanel(); return; }
         guide.submitting = true;
         guide.error = '';
         syncTryOnGuidePanel();
-        const references = taskInputsForRequest().map(item => ({...item,
+        const references = taskReferences(sourceTask).filter(item => item?.url).map(item => ({...item,
+            url:item.role === 'source' ? finalImage : item.url,
+            name:item.role === 'source' ? '最终换衣图' : item.name,
             role:item.role === 'source' ? 'subject' : item.role,
             reference_type:item.role === 'source' ? 'subject' : item.role,
         }));
         const referenceMap = references.map((item,index) => `Image ${index + 1}: ${item.role} (${item.label || item.name || 'reference'})`).join('; ');
-        const requirement = String(currentOptions().instruction || '').trim();
+        const requirement = String(sourceTask?.options?.instruction || sourceTask?.request?.options?.instruction || '').trim();
         const direction = style === 'editorial_silhouette'
             ? 'STYLE A — FASHION SILHOUETTE: In the large center column, arrange the supplied garments into an elegant full-body dressed human silhouette with no visible real person, face, skin, or mannequin head. The subject reference informs only fit and proportions. Show each supplied clothing piece separately in a narrow numbered left column; show the supplied bag, shoes, jewelry and other accessories as isolated objects in a narrow right column.'
             : 'STYLE B — REAL MODEL EDITORIAL: In the large center column, show the selected reference model as the same recognizable full-length person wearing the supplied outfit, preserving face, body and hair. Show each supplied clothing piece separately in a narrow numbered left column; show the supplied bag, shoes, jewelry and other accessories as isolated objects in a narrow right column.';
-        const prompt = `Create ONE finished vertical luxury fashion editorial outfit board, visually following the selected reference layout. Reference order: ${referenceMap}. ${direction} Use an ivory and warm beige studio background, refined dark-brown serif headline at upper left, small editorial section heading at upper right, elegant fine dividers, restrained numbered item captions, generous negative space, and a small palette / material strip at the bottom. The center figure is dominant; the left and right item columns are clearly separated and never overlap it. Keep all readable words short and relevant to the supplied items; do not invent brand names or specific products. Preserve every referenced garment's shape, color, fabric and details. Pose and fabric references guide only their assigned purpose. Do not add unreferenced clothes or accessories. Produce a single complete poster, not a UI screenshot, collage of unrelated photos, or before/after comparison. ${requirement ? `Additional user requirement: ${requirement}` : ''}`;
+        const prompt = `Create ONE finished vertical luxury fashion editorial outfit board, visually following the selected reference layout. Reference order: ${referenceMap}. ${direction} The subject image is the completed try-on result and must anchor the center figure's exact face, pose and finished outfit. Use an ivory and warm beige studio background, refined dark-brown serif headline at upper left, small editorial section heading at upper right, elegant fine dividers, restrained numbered item captions, generous negative space, and a small palette / material strip at the bottom. The center figure is dominant; the left and right item columns are clearly separated and never overlap it. Show each supplied product only once in its item column; never duplicate shoes or numbering. Keep all readable words short and relevant to the supplied items; do not invent brand names or specific products. Preserve every referenced garment's shape, color, fabric and details. Pose and fabric references guide only their assigned purpose. Do not add unreferenced clothes or accessories. Produce a single complete poster, not a UI screenshot, collage of unrelated photos, or before/after comparison. ${requirement ? `Additional user requirement: ${requirement}` : ''}`;
         try {
-            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:state.providerId, model:state.model, aspect_ratio:'4:5', resolution:state.resolution === 'auto' ? '2k' : state.resolution, quality:state.quality, count:1, parent_task_id:''};
+            const sourceParameters = sourceTask?.parameters || sourceTask?.request?.parameters || {};
+            const resolution = sourceParameters.resolution || state.resolution;
+            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:sourceTask?.result?.provider_id || sourceTask?.provider_id || state.providerId, model:sourceTask?.result?.model || sourceTask?.model || state.model, aspect_ratio:'4:5', resolution:resolution === 'auto' ? '2k' : resolution, quality:sourceParameters.quality || state.quality, count:1, parent_task_id:''};
             const task = await fetchJson('/api/ecommerce/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+            if(state.options.try_on?.guide_source_task_id !== ownerTaskId) return;
             guide.task = task;
-            currentOptions().guide_task_id = taskIdOf(task);
+            state.options.try_on.guide_task_id = taskIdOf(task);
             persistSettings();
             scheduleTryOnGuidePoll();
-        } catch(error) { guide.error = `搭配卡生成失败：${error.message}`; }
+        } catch(error) {
+            if(state.options.try_on?.guide_source_task_id === ownerTaskId) {
+                state.options.try_on.guide_source_task_id = '';
+                guide.error = `搭配卡提交失败：${error.message}；为避免重复扣费，不会自动重试。`;
+                persistSettings();
+            }
+        }
         finally { guide.submitting = false; syncTryOnGuidePanel(); }
     }
 
     function scheduleTryOnGuidePoll(){
         clearTimeout(state.tryOnGuide.timer);
-        state.tryOnGuide.timer = setTimeout(pollTryOnGuide, 1800);
+        state.tryOnGuide.timer = setTimeout(() => { state.tryOnGuide.timer = null; void pollTryOnGuide(); }, 1800);
     }
 
     async function pollTryOnGuide(){
         const guide = state.tryOnGuide;
         const id = state.options.try_on?.guide_task_id;
-        if(!id || guide.loading) return;
+        const sourceId = state.options.try_on?.guide_source_task_id;
+        if((!id && !sourceId) || guide.loading) return;
         guide.loading = true;
         try {
+            if(!id) {
+                const sourceTask = await fetchJson(`/api/ecommerce/tasks/${encodeURIComponent(sourceId)}`);
+                if(state.options.try_on?.guide_source_task_id !== sourceId) return;
+                storeTask(sourceTask);
+                if(taskIdOf(state.currentTask) === sourceId) renderTaskResult(sourceTask);
+                if(['queued','running'].includes(sourceTask.status)) scheduleTryOnGuidePoll();
+                else if(sourceTask.status === 'succeeded') await generateTryOnGuide(state.options.try_on.guide_style || 'editorial_model', sourceTask);
+                else {
+                    state.options.try_on.guide_source_task_id = '';
+                    guide.error = `换衣图${sourceTask.status === 'failed' ? '生成失败' : '未完成'}，搭配卡未生成：${sourceTask.error || '请检查换衣任务'}`;
+                    persistSettings();
+                    syncTryOnGuidePanel();
+                }
+                return;
+            }
             const task = await fetchJson(`/api/ecommerce/tasks/${encodeURIComponent(id)}`);
             if(state.options.try_on?.guide_task_id !== id) return;
             guide.task = task;
             guide.error = guide.task.status === 'failed' ? `搭配卡生成失败：${guide.task.error || '请重试'}` : '';
             syncTryOnGuidePanel();
             if(['queued','running'].includes(guide.task.status)) scheduleTryOnGuidePoll();
-        } catch(error) { if(state.options.try_on?.guide_task_id === id) { guide.error = `搭配卡任务读取失败：${error.message}`; syncTryOnGuidePanel(); } }
+        } catch(error) {
+            if((id && state.options.try_on?.guide_task_id === id) || (!id && state.options.try_on?.guide_source_task_id === sourceId)) {
+                guide.error = `${id ? '搭配卡' : '换衣'}任务读取失败：${error.message}`;
+                syncTryOnGuidePanel();
+            }
+        }
         finally { guide.loading = false; }
     }
 
@@ -4175,11 +4215,17 @@
             scheduleTaskPolling(100);
             if(state.operation === 'try_on' && !parentTaskId) {
                 clearTimeout(state.tryOnGuide.timer);
+                state.tryOnGuide.timer = null;
                 state.tryOnGuide.task = null;
+                state.tryOnGuide.error = '';
                 state.tryOnGuide.view = 'guide';
                 state.tryOnGuide.compare = false;
                 currentOptions().guide_task_id = '';
-                await generateTryOnGuide(guideStyle || currentOptions().guide_style || 'editorial_model');
+                currentOptions().guide_source_task_id = taskIdOf(stored);
+                currentOptions().guide_style = guideStyle || currentOptions().guide_style || 'editorial_model';
+                persistSettings();
+                syncTryOnGuidePanel();
+                scheduleTryOnGuidePoll();
             }
         } catch(error) {
             if(isCompatibleModelError(error.message)) {
@@ -4281,7 +4327,18 @@
             } else {
                 state.inputs = Object.fromEntries((task.inputs || []).map(item => [item.role,{...item}]));
             }
-            if(task.options && DEFAULT_OPTIONS[task.operation]) state.options[task.operation] = {...DEFAULT_OPTIONS[task.operation], ...task.options};
+            if(task.options && DEFAULT_OPTIONS[task.operation]) {
+                const existingGuide = state.options.try_on || {};
+                const sameGuideOwner = task.operation === 'try_on' && existingGuide.guide_source_task_id === taskIdOf(task);
+                state.options[task.operation] = {...DEFAULT_OPTIONS[task.operation], ...task.options,
+                    ...(sameGuideOwner ? {guide_source_task_id:existingGuide.guide_source_task_id, guide_task_id:existingGuide.guide_task_id, guide_style:existingGuide.guide_style} : {})};
+                if(task.operation === 'try_on' && !sameGuideOwner) {
+                    clearTimeout(state.tryOnGuide.timer);
+                    state.tryOnGuide.timer = null;
+                    state.tryOnGuide.task = null;
+                    state.tryOnGuide.error = '';
+                }
+            }
             const parameters = task.parameters || task.request?.parameters || {};
             state.providerId = String(task.request?.provider_id ?? task.provider_id ?? state.providerId);
             state.model = String(task.request?.model ?? task.model ?? state.model);

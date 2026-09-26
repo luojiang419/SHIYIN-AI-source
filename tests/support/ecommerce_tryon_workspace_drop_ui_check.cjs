@@ -21,7 +21,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
                 return route.fulfill({json:{id,task_id:id,operation:body.operation,status:'queued',result:null}});
             }
             if(pathname === '/api/ecommerce/tasks') return route.fulfill({json:{tasks:[]}});
-            if(pathname.startsWith('/api/ecommerce/tasks/')) return route.fulfill({json:{id:pathname.split('/').at(-1),status:'queued',result:null}});
+            if(pathname.startsWith('/api/ecommerce/tasks/')) {
+                const id=pathname.split('/').at(-1);
+                const index=Number(id.replace('drop-task-',''))-1;
+                const request=tasks[index] || {};
+                return route.fulfill({json:{id,task_id:id,operation:request.operation,status:request.operation === 'try_on' ? 'succeeded' : 'queued',inputs:request.inputs || [],options:request.options || {},result:request.operation === 'try_on' ? {images:['/static/images/tryon-style-model.jpg']} : null}});
+            }
             return route.fulfill({json:{}});
         });
         const dropImage = async (selector,count=1) => {

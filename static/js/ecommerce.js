@@ -1308,13 +1308,14 @@
         state.inputs[role] = buildTryOnInput(role, item, candidates, selectedIndex);
     }
 
-    function removeTryOnSelectedCandidate(role){
+    function removeTryOnSelectedCandidate(role, candidateIndex=null){
         if(state.operation !== 'try_on' || !isTryOnReferenceRole(role)) return false;
         const existing = state.inputs[role];
         const candidates = tryOnReferenceCandidates(existing);
         if(!candidates.length) return false;
         const selectedIndex = tryOnSelectedReferenceIndex(existing, candidates);
-        revokeReferencePreviewUrl(candidates[selectedIndex] || existing);
+        const removeIndex = candidateIndex === null ? selectedIndex : Math.max(0, Math.min(candidates.length - 1, Number(candidateIndex) || 0));
+        revokeReferencePreviewUrl(candidates[removeIndex] || existing);
         if(candidates.length <= 1) {
             const slotType = existing?.slot_type || defaultSlotTypeIdForRole(role);
             const slotMeta = referenceSlotTypeById(slotType);
@@ -1342,9 +1343,9 @@
             return true;
         }
         const fromCandidate = candidates[selectedIndex] || cleanInputCandidate(existing);
-        candidates.splice(selectedIndex, 1);
-        const nextIndex = Math.max(0, Math.min(candidates.length - 1, selectedIndex));
-        state.tryOnSwitches[role] = tryOnSwitchMeta(-1, fromCandidate);
+        candidates.splice(removeIndex, 1);
+        const nextIndex = removeIndex < selectedIndex ? selectedIndex - 1 : Math.min(selectedIndex, candidates.length - 1);
+        if(removeIndex === selectedIndex) state.tryOnSwitches[role] = tryOnSwitchMeta(-1, fromCandidate);
         state.inputs[role] = buildTryOnInput(role, existing, candidates, nextIndex);
         return true;
     }
@@ -1533,15 +1534,21 @@
     }
 
     function renderTryOnInputs(){
-        const config = currentConfig();
-        const sourceInput = config.inputs.find(input => input.role === 'source') || config.inputs[0];
         const sourceReady = Boolean(state.inputs.source?.url);
         const modelCandidates = tryOnReferenceCandidates(state.inputs.source);
         const selectedModelIndex = tryOnSelectedReferenceIndex(state.inputs.source, modelCandidates);
-        const modelGallery = step => step !== 0 ? '' : `<div class="ec-tryon-model-gallery">
-            <div class="ec-tryon-model-gallery-head"><strong>已添加模特 ${modelCandidates.length} 位</strong><span>选择一位作为当前试穿模特；生成时仅使用选中的人物图。</span></div>
-            <div class="ec-tryon-model-list" aria-label="已添加的模特">${modelCandidates.map((candidate, index) => `<button type="button" class="ec-tryon-model-choice ${index === selectedModelIndex ? 'is-active' : ''}" data-tryon-model-index="${index}" aria-pressed="${index === selectedModelIndex}"><img src="${escapeHtml(referenceDisplayUrl(candidate))}" alt=""><span>模特 ${index + 1}${candidate.uploading ? ' · 上传中' : candidate.upload_error ? ' · 上传失败' : index === selectedModelIndex ? ' · 当前' : ''}</span></button>`).join('')}</div>
-            <button type="button" class="ec-tryon-add-model" data-add-tryon-model>＋ 添加模特（可多选图片）</button>
+        const modelCards = modelCandidates.map((candidate, index) => `<div class="ec-tryon-slot-card is-model ${index === selectedModelIndex ? 'is-active' : ''}">
+            <div class="ec-tryon-card-kicker"><b>${String(index + 1).padStart(2,'0')}</b><span>模特 ${index + 1}</span></div>
+            <div class="ec-tryon-model-photo">
+                <button type="button" class="ec-tryon-model-select" data-tryon-model-index="${index}" aria-pressed="${index === selectedModelIndex}" aria-label="选择模特 ${index + 1}" ${candidate.url ? '' : 'disabled'}><img src="${escapeHtml(referenceDisplayUrl(candidate))}" alt="模特 ${index + 1}"></button>
+                <div class="ec-tryon-model-tools"><button type="button" data-tryon-model-preview="${index}" ${candidate.url ? '' : 'disabled'}>查看</button><button type="button" data-tryon-model-remove="${index}">删除</button></div>
+            </div>
+            <div class="ec-tryon-model-caption" title="${escapeHtml(candidate.upload_error || candidate.name || '')}"><strong>${index === selectedModelIndex ? '当前模特' : '点击卡片选用'}</strong><span>${escapeHtml(candidate.uploading ? '上传中…' : candidate.upload_error || formatName(candidate.name || '人物参考图'))}</span></div>
+        </div>`).join('');
+        const addModelCard = `<div class="ec-tryon-slot-card is-model is-add-model">
+            <div class="ec-tryon-card-kicker"><b>${String(modelCandidates.length + 1).padStart(2,'0')}</b><span>添加模特</span></div>
+            <button type="button" class="ec-upload-slot ec-tryon-add-model-tile" data-role="source" data-add-tryon-model aria-label="添加模特，可一次选择多张图片"><span aria-hidden="true">＋</span><strong>添加模特</strong><small>可一次选择多张图片</small></button>
+            <div class="ec-tryon-model-caption"><strong>人物参考</strong><span>拖放、粘贴或点击上传</span></div>
         </div>`;
         const outfitCount = tryOnOutfitCount();
         const requestedStep = Math.max(0, Math.min(3, Number(currentOptions().guide_step) || 0));
@@ -1560,7 +1567,7 @@
         ];
         const stepHtml = steps.map((item,index) => `<button type="button" data-tryon-step="${index}" class="${index === step ? 'active' : item.done ? 'complete' : ''}" ${index > 0 && !sourceReady || index > 1 && !outfitCount ? 'disabled' : ''} aria-current="${index === step ? 'step' : 'false'}"><b>${escapeHtml(item.number)}</b>${escapeHtml(item.label)}</button>`).join('');
         const headlines = [
-            ['选择试穿模特','可添加多位模特并切换当前人物。上传清晰的全身或半身照片。'],
+            ['选择试穿模特','模特卡片平铺展示；点击选择当前人物，继续添加更多模特。生成时使用选中的一位。'],
             ['搭建穿搭组合','选择至少一件服饰；每个格子负责一种衣物，可继续添加更多参考。'],
             ['完善造型细节','按需补充动作、局部面料和摄影棚氛围；没有额外要求可以直接下一步。'],
             ['审阅提示词并生成','自动读取已选参考图，规划角色归属、服装层次与画面约束。'],
@@ -1572,15 +1579,10 @@
             <div class="ec-tryon-materials">
                 <div class="ec-tryon-step-intro"><small>STEP ${step + 1} / 4</small><h3>${headlines[step][0]}</h3><p>${headlines[step][1]}</p></div>
                 <div class="ec-tryon-reference-grid ec-tryon-closet-grid" aria-label="${escapeHtml(t('ecommerce.tryOnWardrobe'))}">
-                    ${step === 0 ? `<div class="ec-tryon-slot-card is-model">
-                        <div class="ec-tryon-card-kicker"><b>01</b><span>${escapeHtml(t('ecommerce.tryOnModelStage'))}</span></div>
-                        ${inputSlotHtml(sourceInput)}
-                        ${tryOnReferenceTypeRow('source')}
-                    </div>` : ''}
+                    ${step === 0 ? modelCards + addModelCard : ''}
                     ${step === 1 ? visibleWardrobe.map(tryOnWardrobeCard).join('') : ''}
                     ${step === 2 ? tryOnWardrobeCard(TRY_ON_POSE_ROLE) + tryOnFabricDetailCard() + studioReferenceCardHtml('try_on') : ''}
                 </div>
-                ${modelGallery(step)}
                 ${step === 1 && canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
                 ${step === 3 ? `<div class="ec-tryon-prompt-plan"><div><strong>自动提示词</strong><span>参考图 ${taskInputsForRequest().length} 张 · 可在下方补充生成需求</span></div><button type="button" data-tryon-plan-prompt>${prompt ? '重新规划' : '自动规划提示词'}</button><p data-tryon-plan-status>${prompt ? escapeHtml(prompt.message || '规划完成') : '点击后调用视觉分析 API，生成可审阅的最终提示词。'}</p><pre data-tryon-plan-result>${escapeHtml(prompt?.prompt_preview || '尚未规划。生成时系统仍会自动组合角色和服饰约束。')}</pre></div>` : ''}
                 <div class="ec-tryon-step-actions">${step > 0 ? '<button type="button" data-tryon-step-back>上一步</button>' : ''}${step < 3 ? `<button type="button" class="is-primary" data-tryon-step-next>${step === 2 ? '继续到提示词' : '下一步'}</button>` : ''}</div>
@@ -1591,6 +1593,17 @@
         bindTryOnSlotControls();
         el.inputSlots.querySelector('[data-add-tryon-model]')?.addEventListener('click', () => openFilePicker('source'));
         el.inputSlots.querySelectorAll('[data-tryon-model-index]').forEach(button => button.addEventListener('click', () => selectTryOnReference('source', Number(button.dataset.tryonModelIndex))));
+        el.inputSlots.querySelectorAll('[data-tryon-model-preview]').forEach(button => button.addEventListener('click', () => {
+            selectTryOnReference('source', Number(button.dataset.tryonModelPreview));
+            openReferencePreview('source');
+        }));
+        el.inputSlots.querySelectorAll('[data-tryon-model-remove]').forEach(button => button.addEventListener('click', () => {
+            removeTryOnSelectedCandidate('source', Number(button.dataset.tryonModelRemove));
+            state.tryOnPromptPreview = null;
+            renderInputs();
+            validateForm(false);
+            persistSettings();
+        }));
         el.inputSlots.querySelector('[data-tryon-detail-target]')?.addEventListener('change', event => {
             state.inputs.detail = state.inputs.detail || {role:'detail', reference_type:'detail', reference_id:'detail'};
             state.inputs.detail.detail_target_id = event.target.value;

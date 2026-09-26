@@ -18389,7 +18389,9 @@ async def enrich_ecommerce_snapshot_with_garment_analysis(snapshot: Dict[str, An
     if analysis.get("category") in {"upper", "lower", "dress"}:
         working["options"]["garment_category"] = analysis["category"]
         working["options"]["garment_type"] = analysis.get("garment_type") or ""
-        working["prompt"] = build_ecommerce_prompt(working["operation"], working["inputs"], working["options"])
+    # 没有视觉模型或识别失败时仍须返回角色规则生成的提示词；
+    # 否则引导页会收到 HTTP 200，却只能展示空白的“自动规划”结果。
+    working["prompt"] = build_ecommerce_prompt(working["operation"], working["inputs"], working["options"])
     return working, analysis
 
 async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:

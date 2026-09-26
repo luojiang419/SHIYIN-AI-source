@@ -149,7 +149,7 @@
         referencePreview:{key:'', versions:[], selectedIndex:0, mode:'preview', ratio:'free', cropRect:{x:.05,y:.05,w:.9,h:.9}, drag:null},
         tryOnSwitches:{},
         tryOnPromptPreview:null,
-        tryOnGuide:{task:null, submitting:false, error:'', timer:null, view:'guide'},
+        tryOnGuide:{task:null, submitting:false, error:'', timer:null, view:'guide', compare:false},
         compareViewer:null,
         viewportWidth:window.innerWidth,
         settingsNeedsMigration:false,
@@ -1927,13 +1927,18 @@
         const resultBody = resultPanel.querySelector('.ec-result-body');
         const resultHead = resultPanel.querySelector('.ec-result-head');
         let panel = byId('tryOnGuidePanel');
-        let switcher = byId('tryOnResultSwitcher');
+        let finalPanel = byId('tryOnFinalPanel');
+        let gallery = byId('tryOnResultGallery');
         let status = byId('tryOnGuideStatus');
+        let backButton = byId('tryOnBackToFinal');
         if(state.operation !== 'try_on') {
             panel?.remove();
-            switcher?.remove();
+            finalPanel?.remove();
+            gallery?.remove();
             status?.remove();
+            backButton?.remove();
             resultPanel.classList.remove('is-showing-guide');
+            resultPanel.classList.remove('is-showing-final');
             return;
         }
         if(!panel) {
@@ -1946,6 +1951,9 @@
         const task = guide.task;
         const image = task?.result?.images?.[0] || '';
         const running = guide.submitting || ['queued','running'].includes(task?.status);
+        const tryOnTask = state.currentTask;
+        const tryOnImage = tryOnTask?.result?.images?.[state.selectedOutput] || '';
+        const hasResults = Boolean(tryOnTask || task || guide.submitting);
         if(!image && (running || guide.error)) {
             if(!status) {
                 status = document.createElement('span');
@@ -1957,19 +1965,53 @@
             status.textContent = guide.error || '搭配卡生成中…';
         } else status?.remove();
         const showingGuide = Boolean(image && guide.view !== 'tryon');
+        const showingFinal = Boolean(!showingGuide && tryOnImage && !guide.compare);
         resultPanel.classList.toggle('is-showing-guide', showingGuide);
-        if(image && !switcher) {
-            switcher = document.createElement('div');
-            switcher.id = 'tryOnResultSwitcher';
-            switcher.className = 'ec-tryon-result-switcher';
-            resultHead.insertBefore(switcher, el.compareReset);
+        resultPanel.classList.toggle('is-showing-final', showingFinal);
+        const heading = resultHead.querySelector('h2');
+        if(heading) heading.textContent = hasResults ? '生成作品' : t('ecommerce.resultPreview');
+        if(!finalPanel) {
+            finalPanel = document.createElement('section');
+            finalPanel.id = 'tryOnFinalPanel';
+            finalPanel.className = 'ec-tryon-final-panel';
+            resultBody.appendChild(finalPanel);
         }
-        if(!image) switcher?.remove();
+        finalPanel.innerHTML = tryOnImage ? `<div class="ec-tryon-final-head"><div><small>FINAL LOOK</small><h3>最终换衣图</h3></div><div><button type="button" data-compare-tryon>与原图对比</button><button type="button" data-download-tryon>下载图片</button></div></div><div class="ec-tryon-final-art"><img src="${escapeHtml(tryOnImage)}" alt="AI 生成的最终换衣图"></div>` : '';
+        finalPanel.querySelector('[data-compare-tryon]')?.addEventListener('click', () => {
+            guide.compare = true;
+            syncTryOnGuidePanel();
+        });
+        finalPanel.querySelector('[data-download-tryon]')?.addEventListener('click', downloadSelectedPreview);
+        if(!showingGuide && !showingFinal && tryOnImage) {
+            if(!backButton) {
+                backButton = document.createElement('button');
+                backButton.id = 'tryOnBackToFinal';
+                backButton.type = 'button';
+                backButton.textContent = '返回成品大图';
+                backButton.addEventListener('click', () => { guide.compare = false; syncTryOnGuidePanel(); });
+                resultHead.insertBefore(backButton, el.compareReset);
+            }
+        } else backButton?.remove();
+        if(hasResults && !gallery) {
+            gallery = document.createElement('nav');
+            gallery.id = 'tryOnResultGallery';
+            gallery.className = 'ec-tryon-result-gallery';
+            gallery.setAttribute('aria-label','生成作品');
+            resultPanel.appendChild(gallery);
+        }
+        if(!hasResults) gallery?.remove();
         else {
-            switcher.innerHTML = `<button type="button" data-tryon-result-view="guide" aria-pressed="${showingGuide}">搭配卡</button><button type="button" data-tryon-result-view="tryon" aria-pressed="${!showingGuide}">换衣结果</button>`;
-            switcher.querySelectorAll('[data-tryon-result-view]').forEach(button => button.addEventListener('click', () => {
+            const works = [
+                ['guide','搭配卡',image,guide.error || (running ? '生成中' : '等待生成')],
+                ['tryon','最终换衣图',tryOnImage,tryOnTask?.status === 'failed' ? '生成失败' : (tryOnTask?.status === 'succeeded' ? '已完成' : '生成中')],
+            ];
+            gallery.innerHTML = works.map(([view,label,url,emptyText]) => `<button type="button" data-tryon-result-view="${view}" aria-pressed="${view === (showingGuide ? 'guide' : 'tryon')}" ${view === 'guide' && !url ? 'disabled' : ''}><span class="ec-tryon-gallery-thumb">${url ? `<img src="${escapeHtml(url)}" alt="">` : ''}</span><span class="ec-tryon-gallery-copy"><strong>${label}</strong><small>${url ? '点击查看大图' : escapeHtml(emptyText)}</small></span></button>`).join('');
+            gallery.querySelectorAll('[data-tryon-result-view]').forEach(button => button.addEventListener('click', () => {
+                if(button.dataset.tryonResultView === 'guide' && !image) return;
                 guide.view = button.dataset.tryonResultView;
+                guide.compare = false;
                 syncTryOnGuidePanel();
+                gallery.querySelector(`[data-tryon-result-view="${guide.view}"]`)?.focus({preventScroll:true});
             }));
         }
         panel.innerHTML = image ? `<div class="ec-tryon-guide-head"><div><small>OUTFIT CARD</small><h3>模特搭配卡</h3></div><label>导出格式 <select data-tryon-guide-format><option value="png">PNG</option><option value="jpeg">JPG</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div><div class="ec-tryon-guide-result"><img src="${escapeHtml(image)}" alt="AI 生成的模特搭配卡"></div>`
@@ -4135,6 +4177,7 @@
                 clearTimeout(state.tryOnGuide.timer);
                 state.tryOnGuide.task = null;
                 state.tryOnGuide.view = 'guide';
+                state.tryOnGuide.compare = false;
                 currentOptions().guide_task_id = '';
                 await generateTryOnGuide(guideStyle || currentOptions().guide_style || 'editorial_model');
             }

@@ -10,6 +10,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.addInitScript(() => localStorage.setItem('studio_theme','dark'));
         const calls = [];
         let uploadCount = 0;
+        const tryOnResultImage = '/.codex-tmp/tryon-steps-demo/assets/model.png';
         await page.route('**/api/**', async route => {
             const url = new URL(route.request().url());
             const path = url.pathname;
@@ -17,9 +18,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
             if(path === '/api/ecommerce/capabilities') return route.fulfill({json:{models:[{provider_id:'demo',model:'demo-image'}],providers:[{id:'demo',name:'Demo'}],routes:{standard:{provider_id:'demo',model:'demo-image'}},vision_analysis:{enabled:true},reference_slot_types:[]}});
             if(path === '/api/ai/upload') { const name=['model.png','model.png','model.png','blazer.png','trousers.png','loafers.png','blazer-detail.png','blazer.png'][uploadCount++] || 'blazer.png'; const localAsset=nodePath.join('.codex-tmp/tryon-steps-demo/assets',name); const imageUrl=fs.existsSync(localAsset) ? `/${localAsset.replaceAll('\\','/')}?reference=${uploadCount}` : `/static/images/logo.png?reference=${uploadCount}`; return route.fulfill({json:{files:[{url:imageUrl,kind:'image',width:512,height:512,name}]}}); }
             if(path === '/api/ecommerce/analyze') { calls.push({path, body:request.postDataJSON()}); return route.fulfill({json:{status:'succeeded',message:'视觉分析完成',prompt_preview:'人物身份锁定；保留上装材质和颜色；完成真实试穿。',analysis:{status:'succeeded',category:'upper'},reference_plan:{ordered_reference_ids:['source','upper_garment']}}}); }
-            if(path === '/api/ecommerce/tasks' && request.method() === 'POST') { const body=request.postDataJSON(); calls.push({path, body}); const id=body.operation === 'try_on' ? 'tryon-demo' : 'guide-demo'; return route.fulfill({json:{id,task_id:id,operation:body.operation,status:'queued',result:null}}); }
-            if(path === '/api/ecommerce/tasks/guide-demo') return route.fulfill({json:{id:'guide-demo',task_id:'guide-demo',operation:'universal',status:'succeeded',result:{images:['/static/images/logo.png']}}});
-            if(path === '/api/ecommerce/tasks/tryon-demo') return route.fulfill({json:{id:'tryon-demo',task_id:'tryon-demo',operation:'try_on',status:'succeeded',result:{images:['/static/images/logo.png']}}});
+            if(path === '/api/ecommerce/tasks' && request.method() === 'POST') { const body=request.postDataJSON(); calls.push({path, body}); const id=body.operation === 'try_on' ? 'tryon-demo' : 'guide-demo'; return route.fulfill({json:{id,task_id:id,operation:body.operation,status:body.operation === 'try_on' ? 'succeeded' : 'queued',result:body.operation === 'try_on' ? {images:[tryOnResultImage]} : null}}); }
+            if(path === '/api/ecommerce/tasks/guide-demo') return route.fulfill({json:{id:'guide-demo',task_id:'guide-demo',operation:'universal',status:'succeeded',result:{images:['/static/images/tryon-style-silhouette.jpg']}}});
+            if(path === '/api/ecommerce/tasks/tryon-demo') return route.fulfill({json:{id:'tryon-demo',task_id:'tryon-demo',operation:'try_on',status:'succeeded',result:{images:[tryOnResultImage]}}});
             if(path === '/api/ecommerce/tasks') return route.fulfill({json:{tasks:[]}});
             return route.fulfill({json:{}});
         });
@@ -161,9 +162,21 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('[data-tryon-guide-style="editorial_silhouette"]').click();
         await page.waitForFunction(() => document.querySelector('[data-export-tryon-guide]'));
         await page.locator('.ec-result-panel.is-showing-guide .ec-tryon-guide-result img').waitFor();
+        assert.equal(await page.locator('#tryOnResultGallery button').count(),2,'两张成品应并列出现在结果导航');
+        assert.equal(await page.locator('#tryOnResultGallery img').count(),2,'两张成品导航均应显示真实缩略图');
+        assert.equal(await page.locator('[data-tryon-result-view="guide"]').getAttribute('aria-pressed'),'true');
         assert.equal(await page.locator('.ec-result-panel.is-showing-guide #resultWorkspace:visible').count(),0,'搭配卡完成后应取代右侧原预览');
         await page.locator('[data-tryon-result-view="tryon"]').click();
-        assert.equal(await page.locator('#resultWorkspace:visible').count(),1,'仍可查看最终换衣图');
+        assert.equal(await page.locator('.ec-result-panel.is-showing-final .ec-tryon-final-art img:visible').count(),1,'最终换衣图应单独作为右侧大图展示');
+        assert.equal(await page.locator('#resultWorkspace:visible').count(),0,'成品大图默认不叠加对比控件');
+        await page.locator('[data-compare-tryon]').click();
+        assert.equal(await page.locator('#resultWorkspace:visible').count(),1,'需要时仍可进入原图对比');
+        await page.locator('#tryOnBackToFinal').click();
+        assert.equal(await page.locator('.ec-tryon-final-art img:visible').count(),1);
+        const finalDownload = page.waitForEvent('download');
+        await page.locator('[data-download-tryon]').click();
+        assert.match((await finalDownload).suggestedFilename(),/ecommerce-work-try_on-1/);
+        await page.screenshot({path:'.codex-tmp/ecommerce-tryon-final-result.png'});
         await page.locator('[data-tryon-result-view="guide"]').click();
         const analyzeCall = calls.find(item => item.path === '/api/ecommerce/analyze');
         assert.equal(analyzeCall.body.inputs.filter(item => item.role === 'source').length,1);

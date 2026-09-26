@@ -1,10 +1,6 @@
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
-const account = process.env.TRYON_DEMO_ACCOUNT;
-const password = process.env.TRYON_DEMO_PASSWORD;
-if(!account || !password) throw new Error('需要 TRYON_DEMO_ACCOUNT 和 TRYON_DEMO_PASSWORD');
-
 (async () => {
     const browser = await chromium.launch({headless:true,channel:'chrome'});
     try {
@@ -15,8 +11,6 @@ if(!account || !password) throw new Error('需要 TRYON_DEMO_ACCOUNT 和 TRYON_D
             {step:2,width:390,height:844},
         ]) {
             const context = await browser.newContext({viewport:{width,height}});
-            const login = await context.request.post('http://127.0.0.1:8766/api/account/login',{data:{account,password}});
-            assert.equal(login.status(),200);
             const page = await context.newPage();
             if(step === 2) {
                 await page.route('**/api/account/me',async route => {
@@ -27,6 +21,7 @@ if(!account || !password) throw new Error('需要 TRYON_DEMO_ACCOUNT 和 TRYON_D
             await page.goto(`http://127.0.0.1:8767/?step=${step}`);
             const demo = page.frameLocator('#ecommerceDemo');
             await demo.locator('.ec-tryon-stepbar button[aria-current="step"]').waitFor({timeout:15000});
+            assert.equal(await demo.locator('form').filter({hasText:'登录并进入'}).count(),0,'新浏览器应自动进入隔离演示，不出现缩小的登录页');
             const current = await demo.locator('.ec-tryon-stepbar button[aria-current="step"]').textContent();
             assert.ok(current.includes(`0${step}`),current);
             assert.equal(await page.locator('nav,#steps').count(),0,'框架外不应有额外导航');

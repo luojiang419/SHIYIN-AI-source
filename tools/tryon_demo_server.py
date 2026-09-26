@@ -11,10 +11,15 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from main import app
+import main
 
 
+app = main.app
 SEED_PATH = Path(os.environ["TRYON_DEMO_SEED_PATH"]).resolve()
+DEMO_ACCOUNT = os.environ["TRYON_DEMO_ACCOUNT"]
+DEMO_PASSWORD = os.environ["TRYON_DEMO_PASSWORD"]
+# This exception exists only in this isolated wrapper, never in the normal app.
+main.PUBLIC_HTTP_PATHS.add("/demo/tryon")
 
 
 @app.get("/demo/tryon", response_class=HTMLResponse)
@@ -22,6 +27,13 @@ def open_tryon_demo(request: Request, step: int = 1):
     if request.client is None or request.client.host not in {"127.0.0.1", "::1"}:
         raise HTTPException(status_code=404)
     seed = json.loads(SEED_PATH.read_text(encoding="utf-8"))
+    identity = main.ACCOUNT_STORE.authenticate(DEMO_ACCOUNT, DEMO_PASSWORD)
+    if identity is None or identity.account_id != seed["accountId"]:
+        raise HTTPException(status_code=503, detail="隔离演示账号不可用")
+    token = str(request.cookies.get(main.ACCOUNT_SESSION_COOKIE) or "")
+    current = main.ACCOUNT_STORE.resolve_session(token) if token else None
+    if current is None or current.account_id != identity.account_id:
+        token = main.ACCOUNT_STORE.create_session(identity)
     snapshot = json.loads(seed["settings"])
     snapshot["operation"] = "try_on"
     snapshot.setdefault("options", {}).setdefault("try_on", {})["guide_step"] = max(0, min(3, step - 1))
@@ -29,7 +41,7 @@ def open_tryon_demo(request: Request, step: int = 1):
         {"accountId": seed["accountId"], "settings": json.dumps(snapshot, ensure_ascii=False)},
         ensure_ascii=False,
     ).replace("</", "<\\/")
-    return HTMLResponse(
+    response = HTMLResponse(
         "<!doctype html><html lang='zh-CN'><meta charset='utf-8'>"
         "<title>正在打开自由换衣演示</title><body>正在打开自由换衣页面…"
         f"<script>const seed={payload};"
@@ -58,3 +70,12 @@ def open_tryon_demo(request: Request, step: int = 1):
         "</script></body></html>",
         headers={"Cache-Control": "no-store"},
     )
+    response.set_cookie(
+        main.ACCOUNT_SESSION_COOKIE,
+        token,
+        max_age=main.SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+    return response

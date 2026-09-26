@@ -1230,7 +1230,56 @@
         const defaultRole = step === 1 ? 'accessory' : 'detail';
         state.inputs[id] = {role:defaultRole, reference_type:defaultRole, reference_id:id, slot_type:defaultSlotTypeIdForRole(defaultRole), custom_type_label:'', label:'', instruction:'', url:''};
         state.tryOnPromptPreview = null;
-        return true;
+        return id;
+    }
+
+    async function handleDroppedTryOnFiles(files, step, addModel=false){
+        const dropped = Array.from(files || []);
+        const images = dropped.filter(isSupportedImageFile);
+        if(!images.length) {
+            if(dropped.length) showFormError(t('ecommerce.invalidImage'));
+            return;
+        }
+        const invalid = images.map(uploadFileValidationError).find(Boolean);
+        if(invalid) return showFormError(invalid);
+        if(step === 0 || addModel) {
+            await handleSelectedFiles(images, 'source');
+        } else {
+            const cardStep = step === 2 ? 2 : 1;
+            const pairs = [];
+            for(const file of images) {
+                const role = addTryOnExtraSlot(cardStep);
+                if(!role) break;
+                pairs.push({file,role});
+            }
+            if(pairs.length) await uploadInputPairs(pairs);
+            if(pairs.length < images.length) showToast('本次试穿的参考卡片已达到上限', true);
+        }
+        if(images.length < dropped.length) showToast(t('ecommerce.invalidImage'), true);
+    }
+
+    function bindTryOnWorkspaceDrop(step){
+        const workspace = el.inputSlots.querySelector('.ec-tryon-studio');
+        const highlight = workspace?.querySelector('.ec-tryon-materials');
+        if(!workspace) return;
+        workspace.addEventListener('dragover', event => {
+            if(!isFileDrag(event)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+            highlight?.classList.add('is-file-dragover');
+        });
+        workspace.addEventListener('dragleave', event => {
+            if(!workspace.contains(event.relatedTarget)) highlight?.classList.remove('is-file-dragover');
+        });
+        workspace.addEventListener('drop', event => {
+            highlight?.classList.remove('is-file-dragover');
+            if(!isFileDrag(event)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const files = Array.from(event.dataTransfer?.files || []);
+            const addModel = step === 3 && Boolean(event.target.closest?.('.ec-tryon-generation-models'));
+            void handleDroppedTryOnFiles(files.length ? files : droppedFiles(event.dataTransfer),step,addModel);
+        });
     }
 
     function tryOnInputEntriesForRequest(){
@@ -1605,7 +1654,7 @@
     }
 
     function renderTryOnInputs(){
-        const sourceReady = Boolean(state.inputs.source?.url);
+        const sourceReady = Boolean(referenceDisplayUrl(state.inputs.source));
         const modelCandidates = tryOnReferenceCandidates(state.inputs.source);
         const selectedModelIndex = tryOnSelectedReferenceIndex(state.inputs.source, modelCandidates);
         const pendingModelCards = tryOnPendingModelCards();
@@ -1658,7 +1707,7 @@
         el.inputSlots.innerHTML = `<section class="ec-tryon-studio" aria-label="${escapeHtml(t('ecommerce.tryOnAtelier'))}">
             <div class="ec-tryon-stepbar">${stepHtml}</div>
             <div class="ec-tryon-materials">
-                <div class="ec-tryon-step-intro"><small>STEP ${step + 1} / 4</small><h3>${headlines[step][0]}</h3><p>${headlines[step][1]}</p></div>
+                <div class="ec-tryon-step-intro"><small>STEP ${step + 1} / 4</small><h3>${headlines[step][0]}</h3><p>${headlines[step][1]} 将外部图片拖入此区域即可新增卡片，随后选择类型并填写描述。</p></div>
                 <div class="ec-tryon-stage">
                     <div class="ec-tryon-reference-grid ec-tryon-closet-grid" aria-label="${escapeHtml(t('ecommerce.tryOnWardrobe'))}">
                         ${step === 0 ? modelCards + emptyModelCards + addModelCard : ''}
@@ -1675,6 +1724,7 @@
         </section>`;
         el.inputProgress.textContent = step === 0 ? `${modelCandidates.filter(item => item.url).length} 位模特` : step === 1 ? `${[...visibleWardrobe,...extraOutfit].filter(item => state.inputs[item.role]?.url).length}/${visibleWardrobe.length + extraOutfit.length}` : `${completedVisibleReferences + extraTune.filter(item => state.inputs[item.role]?.url).length} 张参考`;
         bindInputSlots();
+        bindTryOnWorkspaceDrop(step);
         bindTryOnSlotControls();
         el.inputSlots.querySelector('[data-add-tryon-model]')?.addEventListener('click', () => {
             const cards = tryOnPendingModelCards();
@@ -1752,10 +1802,10 @@
     }
 
     function tryOnGenerationReferencesHtml(modelCandidates, selectedModelIndex){
-        const modelCards = modelCandidates.filter(item => item?.url).map((item,index) => `<div class="ec-tryon-generation-card ${index === selectedModelIndex ? 'is-selected' : ''}"><img src="${escapeHtml(referenceDisplayUrl(item))}" alt="模特 ${index + 1}"><div><b>${String(index + 1).padStart(2,'0')}</b><span>${escapeHtml(requestReferenceLabel(item,`模特 ${index + 1}`))}</span>${index === selectedModelIndex ? '<em>本次使用</em>' : ''}</div></div>`).join('');
-        const references = taskInputsForRequest().filter(item => item.role !== 'source');
-        const referenceCards = references.map((item,index) => `<div class="ec-tryon-generation-card"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.label || `参考图 ${index + 1}`)}"><div><b>${String(index + 2).padStart(2,'0')}</b><span>${escapeHtml(item.label || item.name || `参考图 ${index + 1}`)}</span></div></div>`).join('');
-        return `<div class="ec-tryon-generation-references"><section class="ec-tryon-generation-models"><h4>模特图 <small>点击第一步可切换本次模特</small></h4><div>${modelCards}</div></section><section class="ec-tryon-generation-outfit"><h4>服饰与参考 <small>按卡片顺序使用</small></h4><div>${referenceCards}</div></section></div>`;
+        const modelCards = modelCandidates.filter(item => referenceDisplayUrl(item)).map((item,index) => `<div class="ec-tryon-generation-card ${index === selectedModelIndex ? 'is-selected' : ''}"><button type="button" class="ec-tryon-generation-photo" data-tryon-model-index="${index}" aria-label="选择模特 ${index + 1}"><img src="${escapeHtml(referenceDisplayUrl(item))}" alt="模特 ${index + 1}"></button><div class="ec-tryon-generation-caption"><b>${String(index + 1).padStart(2,'0')}</b><span>模特 ${index + 1}</span>${index === selectedModelIndex ? '<em>本次使用</em>' : ''}<button type="button" data-tryon-model-remove="${index}" aria-label="删除模特 ${index + 1}">×</button></div><label class="ec-reference-type-row ec-tryon-type-row"><span>类型</span>${referenceTypeComboHtml({selected:selectedSlotTypeId(item,'source'),context:'try_on',fallbackRole:'source',item,dataAttr:'data-tryon-model-type',dataValue:String(index)})}</label>${tryOnDescriptionRow('source',item,index)}</div>`).join('');
+        const references = tryOnInputEntriesForRequest().filter(([slotRole,item]) => slotRole !== 'source' && referenceDisplayUrl(item));
+        const referenceCards = references.map(([slotRole,item],index) => `<div class="ec-tryon-generation-card" data-tryon-wardrobe-role="${escapeHtml(slotRole)}"><img src="${escapeHtml(referenceDisplayUrl(item))}" alt="${escapeHtml(requestReferenceLabel(item,`参考图 ${index + 1}`))}"><div class="ec-tryon-generation-caption"><b>${String(index + 2).padStart(2,'0')}</b><span>${escapeHtml(requestReferenceLabel(item,`参考图 ${index + 1}`))}</span>${slotRole.startsWith('tryon_extra_') ? `<button type="button" data-remove-tryon-extra="${escapeHtml(slotRole)}" aria-label="删除此卡片">×</button>` : ''}</div>${tryOnReferenceTypeRow(slotRole)}${tryOnRequestRoleForSlot(slotRole,item) === 'detail' ? tryOnFabricDetailTargetHtml(slotRole) : ''}${tryOnDescriptionRow(slotRole,item)}</div>`).join('');
+        return `<div class="ec-tryon-generation-references"><section class="ec-tryon-generation-models"><h4>模特图 <small>拖入此列可添加模特</small></h4><div>${modelCards}</div></section><section class="ec-tryon-generation-outfit"><h4>服饰与参考 <small>拖入此列可添加服饰或参考</small></h4><div>${referenceCards}</div></section></div>`;
     }
 
     function updateTryOnModelMetadata(index, patch){
@@ -2315,7 +2365,10 @@
                 event.stopPropagation();
                 if(role === 'source' && slot.dataset.tryonModelEmptyIndex !== undefined) state.activeUploadModelIndex = Number(slot.dataset.tryonModelEmptyIndex);
                 if(currentConfig()?.universal) handleDroppedUniversalFiles(files, role);
-                else if(state.operation === 'try_on' && isTryOnReferenceRole(role)) handleSelectedFiles(files, role);
+                else if(state.operation === 'try_on' && isTryOnReferenceRole(role)) {
+                    if(slot.dataset.tryonModelEmptyIndex === undefined && hasReferenceDisplay(state.inputs[role])) void handleDroppedTryOnFiles(files,Number(currentOptions().guide_step) || 0,role === 'source');
+                    else handleSelectedFiles(files, role);
+                }
                 else {
                     const file = files.find(isSupportedImageFile);
                     if(file) handleSelectedFile(file, role);

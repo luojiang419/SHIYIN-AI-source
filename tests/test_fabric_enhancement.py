@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import numpy as np
 from PIL import Image
 import main
-from canvas_core.fabric_enhancement import enhance_fabric_image, garment_mask, refine_garment_boundary
+from canvas_core.fabric_enhancement import (
+    denim_garment_mask, denim_material_patch, enhance_fabric_image, garment_mask,
+    refine_garment_boundary,
+)
 
 
 def test_flat_material_skips_without_writing(tmp_path):
@@ -14,6 +17,39 @@ def test_flat_material_skips_without_writing(tmp_path):
     out = tmp_path/'result.png'
     assert enhance_fabric_image(src, src, out)['status'] == 'skipped'
     assert not out.exists()
+
+
+def test_known_non_denim_does_not_trigger_blue_denim_fallback(tmp_path):
+    source = tmp_path / 'blue-leather.png'
+    Image.new('RGB', (640, 800), (65, 91, 154)).save(source)
+    with patch('canvas_core.fabric_enhancement.denim_material_patch') as fallback:
+        result = enhance_fabric_image(source, source, tmp_path / 'out.png',
+                                      garment_role='upper_garment', material_hint='blue leather')
+    assert result['reason'] == 'no_reliable_woven_sample'
+    fallback.assert_not_called()
+
+
+def test_denim_fallback_finds_original_weave_and_separates_upper_lower_regions():
+    y, x = np.mgrid[:800, :600]
+    twill = (np.sin((x + y * .7) * 2.1) * 13).astype('int16')
+    reference = np.clip(np.array([65, 91, 154])[None, None] + twill[:, :, None], 0, 255).astype('uint8')
+    patch = denim_material_patch(reference)
+    assert patch is not None
+    assert denim_material_patch(np.full_like(reference, [65, 91, 154])) is None
+
+    base = np.full((1000, 700, 3), [210, 185, 160], dtype='uint8')
+    base[200:490, 170:530] = [58, 82, 140]
+    base[490:700, 190:510] = [119, 144, 190]
+    base[700:850, 200:500] = [205, 155, 135]
+    foreground = np.zeros((1000, 700), dtype='uint8')
+    foreground[100:900, 150:550] = 160
+    upper = denim_garment_mask(base, patch, foreground, 'upper_garment')
+    lower = denim_garment_mask(base, patch, foreground, 'lower_garment')
+    assert upper is not None and lower is not None
+    assert upper[300, 300] and not upper[600, 300]
+    assert lower[600, 300] and not lower[300, 300]
+    assert not upper[750, 300] and not lower[750, 300]
+    assert not np.any(upper[:, :150]) and not np.any(lower[:, :150])
 
 
 def test_missing_foreground_never_changes_background():
@@ -193,6 +229,30 @@ def test_pose_transfer_bound_detail_replaces_full_source_texture_once():
     assert enhance.call_count == 1
     assert enhance.call_args.args[1] == 'detail.png'
     assert result['fabric_enhancement'][0]['status'] == 'applied'
+
+
+def test_try_on_denim_uses_bound_product_role_and_derived_depth():
+    refs = [
+        {'role': 'pose', 'reference_type': 'pose', 'url': '/pose'},
+        {'role': 'control_map', 'reference_type': 'control_map', 'url': '/depth'},
+        {'role': 'source', 'reference_type': 'source', 'url': '/model'},
+        {'role': 'upper_garment', 'reference_type': 'upper_garment', 'reference_id': 'coat', 'url': '/coat'},
+        {'role': 'lower_garment', 'reference_type': 'lower_garment', 'reference_id': 'shorts', 'url': '/shorts'},
+        {'role': 'detail', 'reference_type': 'detail', 'detail_target_id': 'coat', 'url': '/coat-detail'},
+    ]
+    paths = {'/output': 'output.png', '/depth': 'depth.png', '/coat-detail': 'coat-detail.png', '/shorts': 'shorts.png'}
+    batch = {'images': ['/output'], 'image_items': [{'url': '/output'}]}
+    with patch.object(main, 'output_file_from_url', side_effect=lambda url: paths.get(url)), patch(
+        'canvas_core.fabric_enhancement.enhance_fabric_image', return_value={'status': 'skipped', 'reason': 'test'}
+    ) as enhance:
+        asyncio.run(main.apply_fabric_enhancement('try_on', refs, batch, {'product_facts': {
+            'coat': {'garment_type': 'denim jacket', 'fabric_and_weave': 'diagonal twill'},
+            'shorts': {'garment_type': 'denim shorts', 'fabric_and_weave': 'diagonal twill'},
+        }}))
+    assert [call.args[1] for call in enhance.call_args_list] == ['coat-detail.png', 'shorts.png']
+    assert [call.args[3] for call in enhance.call_args_list] == ['depth.png', 'depth.png']
+    assert [call.kwargs['garment_role'] for call in enhance.call_args_list] == ['upper_garment', 'lower_garment']
+    assert all('denim' in call.kwargs['material_hint'] for call in enhance.call_args_list)
 
 
 def test_universal_output_depth_failure_keeps_existing_mask_fallback():

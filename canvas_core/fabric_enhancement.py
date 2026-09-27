@@ -8,6 +8,8 @@ from PIL import Image, ImageOps
 
 _LOCK = threading.Lock()
 MAX_PIXELS = 40_000_000
+DENIM_HUE_MIN = 95
+DENIM_HUE_MAX = 130
 
 
 def read_rgb(path):
@@ -57,6 +59,95 @@ def material_patch(reference):
             if best is None or score > best[0]:
                 best = (score, patch.copy(), np.median(colors.reshape(-1, 3), axis=0))
     return None if best is None else best[1:]
+
+
+def denim_material_patch(reference):
+    """从完整牛仔商品图中保守挑出原像素织纹，避开人台和大面积背景。"""
+    h, w = reference.shape[:2]
+    if min(h, w) < 256:
+        return None
+    hsv = cv2.cvtColor(reference, cv2.COLOR_RGB2HSV)
+    blue = ((hsv[:, :, 0] >= DENIM_HUE_MIN) & (hsv[:, :, 0] <= DENIM_HUE_MAX)
+            & (hsv[:, :, 1] >= 40) & (hsv[:, :, 2] >= 30) & (hsv[:, :, 2] <= 245))
+    if np.mean(blue) < .15:
+        return None
+    side = 256
+    best = None
+    for y in range(side, h-side, 128):
+        for x in range(side, w-side, 128):
+            coverage = float(np.mean(blue[y:y+side, x:x+side]))
+            if coverage < .93:
+                continue
+            patch = reference[y:y+side, x:x+side]
+            gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY).astype('float32')
+            high = gray - cv2.GaussianBlur(gray, (0, 0), 4)
+            strength = float(np.std(np.clip(high, -35, 35)))
+            if not 4 < strength < 36:
+                continue
+            low_variation = float(cv2.GaussianBlur(gray, (0, 0), 12).std())
+            score = coverage*35 + strength*.15 - low_variation*.7
+            if best is None or score > best[0]:
+                best = (score, patch.copy())
+    return None if best is None else best[1]
+
+
+def quilt_denim_weave(weave, height, width):
+    """重叠混合原像素高频块，避免整图平铺出现固定周期的缝线。"""
+    side = min(weave.shape)
+    step = max(32, side//2)
+    window = np.outer(np.hanning(side), np.hanning(side)).astype('float32')
+    texture = np.zeros((height, width), dtype='float32')
+    weights = np.zeros((height, width), dtype='float32')
+    rng = np.random.default_rng(0)
+    for top in range(-step, height, step):
+        y0, y1 = max(0, top), min(height, top+side)
+        if y0 >= y1:
+            continue
+        sy0, sy1 = y0-top, y1-top
+        for left in range(-step, width, step):
+            x0, x1 = max(0, left), min(width, left+side)
+            if x0 >= x1:
+                continue
+            sx0, sx1 = x0-left, x1-left
+            shifted = np.roll(weave, (int(rng.integers(side)), int(rng.integers(side))), axis=(0, 1))
+            blend = window[sy0:sy1, sx0:sx1]
+            texture[y0:y1, x0:x1] += shifted[sy0:sy1, sx0:sx1] * blend
+            weights[y0:y1, x0:x1] += blend
+    return texture / np.maximum(weights, 1e-5)
+
+
+def denim_garment_mask(base, patch, foreground, garment_role):
+    """人物深度限定后按上下装分区，只在生成图中的蓝色布面迁移织纹。"""
+    if foreground is None or garment_role not in {'upper_garment', 'lower_garment'}:
+        return None
+    h, w = base.shape[:2]
+    person = cv2.resize(foreground, (w, h), interpolation=cv2.INTER_LINEAR) > 12
+    ys, _ = np.where(person)
+    if ys.size < h*w*.08:
+        return None
+    top, bottom = int(ys.min()), int(ys.max())
+    extent = bottom-top+1
+    if extent < h*.4:
+        return None
+    hsv_patch = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
+    source_hue = int(np.median(hsv_patch[:, :, 0]))
+    hsv = cv2.cvtColor(base, cv2.COLOR_RGB2HSV)
+    hue_distance = np.abs(hsv[:, :, 0].astype('int16')-source_hue)
+    blue = ((hue_distance <= 17) & (hsv[:, :, 0] >= DENIM_HUE_MIN)
+            & (hsv[:, :, 0] <= DENIM_HUE_MAX) & (hsv[:, :, 1] >= 30)
+            & (hsv[:, :, 2] >= 25) & (hsv[:, :, 2] <= 245))
+    mask = (blue & person).astype('uint8') * 255
+    if garment_role == 'upper_garment':
+        mask[:max(0, round(top + extent*.09))] = 0
+        mask[min(h, round(top + extent*.43)):] = 0
+    else:
+        mask[:max(0, round(top + extent*.42))] = 0
+        mask[min(h, round(top + extent*.68)):] = 0
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), 'uint8'))
+    mask[~person] = 0
+    if np.count_nonzero(mask) < h*w*.01:
+        return None
+    return cv2.erode(mask, np.ones((3, 3), 'uint8'))
 
 
 def garment_mask(base, color, foreground):
@@ -165,37 +256,51 @@ def refine_garment_boundary(base, mask):
     return refined
 
 
-def enhance_fabric_image(generated, detail, output, control=None):
+def enhance_fabric_image(generated, detail, output, control=None, *, garment_role='', material_hint=''):
     # 限制高分辨率数组并发，批量任务不同时占用数 GB 内存。
     with _LOCK:
         base, reference = read_rgb(generated), read_rgb(detail)
         material = material_patch(reference)
-        if material is None:
+        denim_patch = None
+        known_other_material = bool(material_hint) and not any(
+            word in str(material_hint).lower() for word in ('denim', '牛仔')
+        )
+        if material is None and garment_role in {'upper_garment', 'lower_garment'} and not known_other_material:
+            denim_patch = denim_material_patch(reference)
+        if material is None and denim_patch is None:
             return {'status': 'skipped', 'reason': 'no_reliable_woven_sample'}
         foreground = None
         if control:
             with Image.open(control) as im:
                 foreground = np.asarray(im.convert('L'))
-        patch, color = material
-        mask = garment_mask(base, color, foreground)
+        if denim_patch is not None:
+            patch = denim_patch
+            mask = denim_garment_mask(base, patch, foreground, garment_role)
+        else:
+            patch, color = material
+            mask = garment_mask(base, color, foreground)
         if mask is None:
             return {'status': 'skipped', 'reason': 'garment_mask_ambiguous'}
-        mask = refine_garment_boundary(base, mask)
-        if mask is None:
-            return {'status': 'skipped', 'reason': 'garment_boundary_ambiguous'}
+        if denim_patch is None:
+            mask = refine_garment_boundary(base, mask)
+            if mask is None:
+                return {'status': 'skipped', 'reason': 'garment_boundary_ambiguous'}
         h, w = base.shape[:2]
         scale = max(.5, min(1., max(h, w)/4800*.75))
         patch = cv2.resize(patch, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY).astype('float32')
         weave = gray-cv2.GaussianBlur(gray, (0, 0), 4)
         weave -= weave.mean()
-        ph, pw = weave.shape
-        tiled = np.tile(weave, ((h+ph-1)//ph, (w+pw-1)//pw))[:h, :w]
-        shifted = np.roll(tiled, (ph//2, pw//2), axis=(0, 1))
-        yy, xx = np.arange(h)%ph, np.arange(w)%pw
-        weight = np.minimum(np.minimum(yy, ph-yy)[:, None], np.minimum(xx, pw-xx)[None, :])
-        weight = np.clip(weight.astype('float32')/24, 0, 1)
-        texture = np.clip((tiled*weight+shifted*(1-weight))*.5, -12, 12)
+        if denim_patch is not None:
+            texture = np.clip(quilt_denim_weave(weave, h, w)*.7, -18, 18)
+        else:
+            ph, pw = weave.shape
+            tiled = np.tile(weave, ((h+ph-1)//ph, (w+pw-1)//pw))[:h, :w]
+            shifted = np.roll(tiled, (ph//2, pw//2), axis=(0, 1))
+            yy, xx = np.arange(h)%ph, np.arange(w)%pw
+            weight = np.minimum(np.minimum(yy, ph-yy)[:, None], np.minimum(xx, pw-xx)[None, :])
+            weight = np.clip(weight.astype('float32')/24, 0, 1)
+            texture = np.clip((tiled*weight+shifted*(1-weight))*.5, -12, 12)
         alpha = cv2.GaussianBlur(mask.astype('float32')/255, (0, 0), 1.5)
         alpha[mask == 0] = 0
         result = np.clip(base.astype('float32')+texture[:, :, None]*alpha[:, :, None], 0, 255).astype('uint8')
@@ -203,4 +308,5 @@ def enhance_fabric_image(generated, detail, output, control=None):
         destination.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(result).save(destination, 'PNG')
         return {'status': 'applied', 'masked_pixels': int(np.count_nonzero(mask)), 'scale': scale,
-                'boundary_guard': 'image_edges_inset_v1'}
+                'material_source': 'denim_original_pixels' if denim_patch is not None else 'woven_sample',
+                'boundary_guard': 'depth_denim_role_v1' if denim_patch is not None else 'image_edges_inset_v1'}

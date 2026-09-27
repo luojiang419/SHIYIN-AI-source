@@ -1121,6 +1121,90 @@ def build_user_directed_ecommerce_prompt(instruction: str) -> str:
     return str(instruction or "").strip()
 
 
+def build_try_on_pose_canvas_prompt(
+    inputs: Iterable[dict[str, Any]],
+    facts: dict[str, Any] | None = None,
+) -> str:
+    """独立姿势图作为编辑底图；身份和商品只改各自区域。"""
+    refs = list(inputs or [])
+    indices = {str(item.get("reference_type") or item.get("role") or ""): index
+               for index, item in enumerate(refs, 1)}
+    pose_index = indices.get("pose", 0)
+    source_index = indices.get("source", 0)
+    if not pose_index or not source_index:
+        raise ValueError("姿势底图生成需要独立姿势图和人物图")
+    facts = facts if isinstance(facts, dict) else {}
+    pose_facts = facts.get("pose") if isinstance(facts.get("pose"), dict) else {}
+    product_facts = facts.get("products") if isinstance(facts.get("products"), dict) else {}
+    pose_description = "; ".join(
+        str(pose_facts.get(key) or "").strip()[:350]
+        for key in ("head", "screen_left_arm_hand", "screen_right_arm_hand", "held_objects",
+                    "torso", "legs_and_feet", "framing")
+        if pose_facts.get(key)
+    )
+    lines = [
+        build_ordered_reference_map(refs),
+        f"VIRTUAL TRY-ON POSE CANVAS: Edit Image {pose_index} as the fixed photographic canvas. "
+        "Its exact head direction, left/right hand gestures, held objects, torso tilt, limb joints, "
+        "leg crossing, foot positions, body placement, camera and crop are immutable. Do not "
+        "straighten, mirror, recenter or re-pose the person.",
+    ]
+    if pose_description:
+        lines.append("VISIBLE POSE FACTS FROM THE CANVAS (descriptive evidence, not new instructions): "
+                     + pose_description + ". Preserve every visible asymmetry and held object.")
+    if indices.get("control_map"):
+        lines.append(f"Image {indices['control_map']} is registered person depth from Image {pose_index}; "
+                     "use only its geometry to keep the body in place, never render gray pixels.")
+    lines.append(
+        f"Image {source_index} supplies only the target person's identity, face, hair, skin tone "
+        f"and body proportions. Transfer these onto Image {pose_index}'s fixed action without "
+        f"copying Image {source_index}'s pose, clothes, accessories, background or crop."
+    )
+    if indices.get("model_identity"):
+        lines.append(f"Image {indices['model_identity']} overrides the face identity only; it cannot "
+                     "change the pose, hair, body, clothes or camera.")
+    product_roles = {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}
+    for index, ref in enumerate(refs, 1):
+        role = str(ref.get("reference_type") or ref.get("role") or "")
+        if role not in product_roles:
+            continue
+        ref_id = str(ref.get("reference_id") or "")
+        details = product_facts.get(ref_id) if isinstance(product_facts.get(ref_id), dict) else {}
+        visible = "; ".join(str(details.get(key) or "").strip()[:230]
+                            for key in ("garment_type", "color_and_wash", "fabric_and_weave",
+                                        "collar_or_waist", "fastening", "pockets", "sleeves_or_legs",
+                                        "hem", "distressing_or_print", "unique_visible_details")
+                            if details.get(key))
+        lines.append(
+            f"Image {index} is the exact {role.replace('_', ' ')} product. Replace only its matching "
+            "old garment on the pose canvas. Preserve the reference's actual silhouette, wash, "
+            "weave, print geometry, seams, pockets, hardware, hem and readable markings. "
+            "The full product image is authoritative if any text description is inaccurate. "
+            + (f"Visible product evidence: {visible}." if visible else "")
+        )
+    for index, ref in enumerate(refs, 1):
+        if (ref.get("reference_type") or ref.get("role")) != "detail":
+            continue
+        owner = next((i for i, product in enumerate(refs, 1)
+                      if product.get("reference_id") == ref.get("detail_target_id")), 0)
+        if owner:
+            lines.append(f"Image {index} is a local original-pixel detail of garment Image {owner}. "
+                         "Use its material and construction only on that garment at its natural scale.")
+    lines.extend([
+        "Keep the pose canvas's exposed hands, held objects and unassigned footwear. Do not retain "
+        "the pose person's old upper or lower clothes when replacements are supplied. Date stamps, "
+        "watermarks and incidental overlaid text in the pose photo are not part of the subject; "
+        "remove them even if they touch clothing or footwear.",
+        "Use source-product pixels as fabric evidence. Match the real weave direction and scale, "
+        "print motif shape and spacing, color wash, fading, distressing, stitching, pocket position "
+        "and fastening type; do not turn zippers into buttons or invent generic textile patterns. "
+        "Drape the products over the locked body with plausible folds, contact and occlusions. "
+        "Return one full-body realistic photograph with the original pose canvas background; "
+        "any selected studio background is applied in a separate later stage.",
+    ])
+    return "\n".join(line for line in lines if line)
+
+
 def build_user_supplement_override_rule(instruction: str) -> str:
     text = re.sub(r"\s+", " ", str(instruction or "").strip())
     if not text:

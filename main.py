@@ -196,6 +196,7 @@ from canvas_core.ecommerce import (
     QUALITY_CHECKS as ECOMMERCE_QUALITY_CHECKS,
     build_model_catalog as build_ecommerce_model_catalog,
     build_prompt as build_ecommerce_prompt,
+    build_try_on_pose_canvas_prompt,
     comparison_reference as ecommerce_comparison_reference,
     parse_garment_analysis as parse_ecommerce_garment_analysis,
     parse_universal_reference_analysis as parse_ecommerce_universal_reference_analysis,
@@ -17371,6 +17372,31 @@ async def apply_fabric_enhancement(operation: str, references: List[Any], batch:
     control_ref = by_role.get('control_map')
     control_url = str(control_ref.get('url') or '') if isinstance(control_ref, dict) else str(getattr(control_ref, 'url', '') or '')
     control = output_file_from_url(control_url) if control_url else None
+    garment_roles = {}
+    material_hints = {}
+    if operation == 'try_on':
+        products = [ref for ref in references if isinstance(ref, dict) and (ref.get('reference_type') or ref.get('role')) in {'upper_garment', 'lower_garment'}]
+        ids = {str(ref.get('reference_id') or ''): str(ref.get('reference_type') or ref.get('role')) for ref in products}
+        garment_roles.update({str(ref.get('url') or ''): str(ref.get('reference_type') or ref.get('role')) for ref in products})
+        product_facts = (context or {}).get('product_facts') or {}
+        for ref in products:
+            product_id = str(ref.get('reference_id') or '')
+            evidence = product_facts.get(product_id) if isinstance(product_facts, dict) else {}
+            if isinstance(evidence, dict):
+                material_hints[str(ref.get('url') or '')] = ' '.join(
+                    str(evidence.get(key) or '') for key in ('garment_type', 'fabric_and_weave')
+                )
+        for ref in references:
+            if not isinstance(ref, dict) or (ref.get('reference_type') or ref.get('role')) != 'detail':
+                continue
+            owner = ids.get(str(ref.get('detail_target_id') or ''))
+            if not owner and len(products) == 1:
+                owner = str(products[0].get('reference_type') or products[0].get('role'))
+            if owner:
+                garment_roles[str(ref.get('url') or '')] = owner
+                product = next((item for item in products if item.get('reference_id') == ref.get('detail_target_id')), None)
+                if product:
+                    material_hints[str(ref.get('url') or '')] = material_hints.get(str(product.get('url') or ''), '')
     audit, originals = [], list(batch['images'])
     for index, url in enumerate(originals):
         source = output_file_from_url(url)
@@ -17389,26 +17415,35 @@ async def apply_fabric_enhancement(operation: str, references: List[Any], batch:
                     depth_audit = {'status':'skipped','reason':type(exc).__name__}
             current, applied, skipped = source, [], []
             for reference_url in reference_urls:
+                garment_role = garment_roles.get(reference_url, '')
                 detail = output_file_from_url(reference_url)
                 if not detail:
-                    skipped.append('reference_unavailable')
+                    skipped.append({'reference_url': reference_url, 'garment_role': garment_role,
+                                    'reason': 'reference_unavailable'})
                     continue
                 destination = os.path.join(OUTPUT_OUTPUT_DIR, f'fabric_{uuid.uuid4().hex}.png')
                 try:
-                    outcome = await asyncio.to_thread(enhance_fabric_image, current, detail, destination, image_control)
+                    kwargs = {'garment_role': garment_role,
+                              'material_hint': material_hints.get(reference_url, '')} if operation == 'try_on' else {}
+                    outcome = await asyncio.to_thread(enhance_fabric_image, current, detail, destination, image_control, **kwargs)
                     if outcome.get('status') == 'applied':
-                        current, applied = destination, [*applied, outcome]
+                        current, applied = destination, [*applied, {**outcome, 'reference_url': reference_url,
+                                                                    'garment_role': garment_role}]
                     else:
-                        skipped.append(str(outcome.get('reason') or 'skipped'))
+                        skipped.append({'reference_url': reference_url, 'garment_role': garment_role,
+                                        'reason': str(outcome.get('reason') or 'skipped')})
                 except Exception as exc:
-                    skipped.append(f'processing_failed:{type(exc).__name__}')
+                    skipped.append({'reference_url': reference_url, 'garment_role': garment_role,
+                                    'reason': f'processing_failed:{type(exc).__name__}'})
             if applied:
-                entry = {'status': 'applied', 'original_url': url, 'steps': applied}
+                entry = {'status': 'partial' if skipped else 'applied', 'original_url': url,
+                         'steps': applied, 'skipped': skipped}
                 enhanced = media_url_from_path(current)
                 batch['images'][index] = enhanced
                 batch['image_items'][index] = image_output_meta(enhanced)
             elif skipped:
-                entry['reason'] = skipped[-1]
+                entry['reason'] = skipped[-1]['reason']
+                entry['skipped'] = skipped
         if depth_audit is not None:
             entry['output_depth'] = depth_audit
         audit.append(entry)
@@ -17708,6 +17743,21 @@ ECOMMERCE_GARMENT_ANALYSIS_PROMPT = """请只分析图片中的服装产品，�
 {"category":"upper|lower|dress","garment_type":"具体服装名称","confidence":0.0,"reason":"简短判断依据"}
 category 只能是 upper（上装）、lower（下装）或 dress（连衣裙/连体衣）。如果图片中有模特，仍只判断需要试穿的主要服装。
 reason 要写可见证据，例如领口、袖长、腰头、裤腿、裙摆、连体结构、颜色和主要材质；不要根据背景、模特动作或风格猜测。"""
+TRY_ON_POSE_FACTS_PROMPT = (
+    "Describe the target pose in this photo for an image editor. Output compact valid JSON with "
+    "keys: head, screen_left_arm_hand, screen_right_arm_hand, held_objects, torso, legs_crossed "
+    "(true or false), legs_and_feet, framing. Distinguish screen left from screen right. Describe "
+    "the exact hand gestures, any handheld object, and if the legs cross, which lower leg is in "
+    "front. Do not describe clothing, identity, or background. Do not give editing instructions."
+)
+TRY_ON_PRODUCT_FACTS_PROMPT = (
+    "Describe only the garment product in this photo for exact virtual try-on. Return compact "
+    "valid JSON with keys: garment_type, color_and_wash, fabric_and_weave, collar_or_waist, "
+    "fastening, pockets, sleeves_or_legs, hem, distressing_or_print, unique_visible_details. "
+    "For every pocket, state its position relative to chest, waist and hem; do not call a low "
+    "hip pocket a chest pocket. Distinguish visible zippers from snaps and buttons. State only "
+    "observed features. Do not describe mannequin, background or pose."
+)
 ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT = """请分析这张电商全能模式参考图。参考角色：{role}。用户标签：{label}。用户单图要求：{instruction}。
 参考角色已经由用户明确指定，是不可更改的唯一类型事实。禁止根据图片内容重新分类、改变角色、决定合成模式或把首图识别为 A 基准图。
 分析目标：只为 Nano Banana Pro / Gemini 3 Pro Image 多参考图生成提取“角色内部的保真证据”，不是写创意文案。必须严格按参考角色隔离证据：商品角色只提取商品，动作角色只提取动作空间，场景角色只提取环境，主体角色提取身体、发型和主体场景，模特形象角色只提取脸部，禁止跨角色借用信息。
@@ -18329,6 +18379,140 @@ def cache_ecommerce_vision_analysis(cache_key: str, analysis: Dict[str, Any]):
         ECOMMERCE_VISION_CACHE[cache_key] = dict(analysis)
         while len(ECOMMERCE_VISION_CACHE) > ECOMMERCE_VISION_CACHE_LIMIT:
             ECOMMERCE_VISION_CACHE.pop(next(iter(ECOMMERCE_VISION_CACHE)))
+
+
+async def analyze_try_on_reference_fact(item: Dict[str, Any], prompt: str, route: Dict[str, str]) -> Dict[str, Any]:
+    path = output_file_from_url(item.get("url") or "")
+    if not path:
+        return {}
+    try:
+        cache_key = ecommerce_vision_cache_key(path, prompt, route)
+    except OSError:
+        return {}
+    cached = get_cached_ecommerce_vision_analysis(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        async with ECOMMERCE_VISION_SEMAPHORE:
+            raw, _ = await asyncio.wait_for(
+                caption_image_with_provider(path, prompt, route["provider_id"], route["model"]),
+                timeout=90,
+            )
+        match = re.search(r"\{.*\}", str(raw or ""), re.S)
+        parsed = json.loads(match.group(0)) if match else {}
+        if not isinstance(parsed, dict):
+            return {}
+        facts = {
+            key: ([str(value)[:220] for value in raw_value[:4]] if isinstance(raw_value, list)
+                  else raw_value if isinstance(raw_value, bool)
+                  else str(raw_value or "").strip()[:350])
+            for key, raw_value in parsed.items()
+            if raw_value is not None and key in (
+                {"head", "screen_left_arm_hand", "screen_right_arm_hand", "held_objects", "torso",
+                 "legs_crossed", "legs_and_feet", "framing"}
+                if prompt == TRY_ON_POSE_FACTS_PROMPT else
+                {"garment_type", "color_and_wash", "fabric_and_weave", "collar_or_waist",
+                 "fastening", "pockets", "sleeves_or_legs", "hem", "distressing_or_print",
+                 "unique_visible_details"}
+            )
+        }
+        cache_ecommerce_vision_analysis(cache_key, facts)
+        return facts
+    except Exception:
+        return {}
+
+
+async def analyze_try_on_canvas_facts(references: List[Dict[str, Any]]) -> Dict[str, Any]:
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return {"status": "skipped", "pose": {}, "products": {}}
+    pose = next((ref for ref in references if ref.get("reference_type") == "pose"), None)
+    products = [ref for ref in references if ref.get("reference_type") in
+                {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}][:6]
+    jobs = ([analyze_try_on_reference_fact(pose, TRY_ON_POSE_FACTS_PROMPT, route)] if pose else []) + [
+        analyze_try_on_reference_fact(ref, TRY_ON_PRODUCT_FACTS_PROMPT, route) for ref in products
+    ]
+    answers = await asyncio.gather(*jobs) if jobs else []
+    pose_facts = answers[0] if pose and answers else {}
+    product_answers = answers[1:] if pose else answers
+    return {
+        "status": "succeeded" if pose_facts or any(product_answers) else "skipped",
+        "pose": pose_facts,
+        "products": {str(ref.get("reference_id") or ""): facts
+                     for ref, facts in zip(products, product_answers) if facts},
+        "provider_id": route["provider_id"], "model": route["model"],
+    }
+
+
+async def inspect_try_on_candidate(snapshot: Dict[str, Any], candidate_url: str, *, final_stage: bool = False) -> Dict[str, Any]:
+    """在交付前用原始五图核对动作、身份和每件服装，不以出图成功代替验收。"""
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return {"status": "unavailable", "passed": False, "issues": ["未配置可用视觉验收模型"]}
+    refs = snapshot.get("inputs") or []
+    pose = next((ref for ref in refs if ref.get("reference_type") == "pose"), None)
+    source = next((ref for ref in refs if ref.get("reference_type") == "source"), None)
+    products = [ref for ref in refs if ref.get("reference_type") in
+                {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}]
+    if not pose or not source or not products:
+        return {"status": "unavailable", "passed": False, "issues": ["缺少动作、人物或服装参考"]}
+    images = [candidate_url, pose["url"], source["url"], *[ref["url"] for ref in products]]
+    product_labels = [f"Image {index + 4}: {ref.get('reference_type')}"
+                      for index, ref in enumerate(products)]
+    analysis = (snapshot.get("pose_depth") or {}).get("visual_facts") or {}
+    pose_facts = analysis.get("pose") if isinstance(analysis.get("pose"), dict) else {}
+    product_facts = analysis.get("products") if isinstance(analysis.get("products"), dict) else {}
+    reference_observations = {
+        "pose": {key: str(pose_facts.get(key) or "")[:220] for key in
+                 ("screen_left_arm_hand", "screen_right_arm_hand", "legs_and_feet")},
+        "products": [
+            {key: str((product_facts.get(str(ref.get("reference_id") or "")) or {}).get(key) or "")[:220]
+             for key in ("garment_type", "fastening", "pockets", "hem", "distressing_or_print")}
+            for ref in products
+        ],
+    }
+    message = (
+        "Image 1 is the generated candidate. Image 2 is the required pose, Image 3 the target "
+        "person identity. " + "; ".join(product_labels) + ". Compare visible evidence across "
+        "these actual images, not the user's written wishes. Describe hand positions only by "
+        "screen-left and screen-right; never use anatomical left/right. Return strict JSON with keys "
+        "pose_match, identity_match, product_matches (one boolean per product image in order), "
+        "watermark_free (boolean), "
+        "all_passed (boolean), issues (array of short concrete observations). Fail pose_match for "
+        "wrong left/right hand action, held object, leg crossing or crop. Fail identity_match for "
+        "wrong face or hairstyle. Fail a product for missing clothing, wrong type, major wash/print, "
+        "pockets, fastener or hem. A long trouser cannot match shorts. A generic smooth textile "
+        "cannot match obvious reference fabric. "
+        + ("Fail watermark_free for any unwanted date stamp or watermark anywhere in the final studio image. "
+           if final_stage else
+           "Fail watermark_free only if an unwanted date stamp or watermark is printed over the person, held object or footwear; ignore stamps entirely in the removable background. ")
+        + "Independent reference observations: "
+        + json.dumps(reference_observations, ensure_ascii=False)[:1600]
+        + ". These observations clarify screen sides and product structure; actual reference images "
+          "remain authoritative. Do not assume compliance from image quality."
+    )
+    try:
+        request = CanvasLLMRequest(message=message, provider=route["provider_id"],
+                                   model=route["model"], images=images, web_search=False, retry_524=0)
+        response = await asyncio.wait_for(canvas_llm(request), timeout=120)
+        raw = str(response.get("text") or "")
+        match = re.search(r"\{.*\}", raw, re.S)
+        parsed = json.loads(match.group(0)) if match else {}
+        if not isinstance(parsed, dict):
+            raise ValueError("视觉验收未返回 JSON 对象")
+        product_matches = parsed.get("product_matches")
+        if not isinstance(product_matches, list) or len(product_matches) != len(products):
+            raise ValueError("视觉验收未逐件返回服装结果")
+        checks = [parsed.get("pose_match") is True, parsed.get("identity_match") is True,
+                  *[value is True for value in product_matches], parsed.get("watermark_free") is True]
+        issues = [str(item)[:240] for item in (parsed.get("issues") or []) if isinstance(item, str)][:8]
+        passed = all(checks) and parsed.get("all_passed") is True
+        return {"status": "succeeded", "passed": passed, "pose_match": checks[0],
+                "identity_match": checks[1], "product_matches": checks[2:-1],
+                "watermark_free": checks[-1],
+                "issues": issues, "provider_id": route["provider_id"], "model": route["model"]}
+    except Exception as exc:
+        return {"status": "failed", "passed": False, "issues": [str(exc)[:240]]}
 
 async def analyze_ecommerce_universal_reference(index: int, item: Dict[str, Any], route: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
     reference_id = str(item.get("reference_id") or f"reference_{index + 1}")
@@ -20547,13 +20731,14 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
         "score": int(final.get("score") or 0),
     }
 
-async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Dict[str, Any]:
+async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any], retry_note: str = "") -> Dict[str, Any]:
     studio_reference = str((snapshot.get("options") or {}).get("studio_reference") or "").strip()
     if not studio_reference or snapshot.get("operation") == "background_change":
         return batch
     images = list(batch.get("images") or [])
     if not images:
         raise HTTPException(status_code=502, detail="原始电商生成没有可用于摄影棚背景替换的图片")
+    pose_canvas = snapshot.get("operation") == "try_on" and (snapshot.get("pose_depth") or {}).get("pose_canvas")
     studio_prompt = build_ecommerce_prompt(
         "background_change",
         [{"role": "source", "url": image} for image in images],
@@ -20562,7 +20747,18 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
     pose_reference = next((ref for ref in snapshot.get("inputs") or []
                            if ref.get("reference_type") == "pose" or ref.get("role") == "pose"), None)
     depth_url = str((snapshot.get("pose_depth") or {}).get("url") or "")
-    if snapshot.get("operation") == "try_on" and (pose_reference or depth_url):
+    if pose_canvas:
+        studio_prompt += (
+            " Image 1 is the approved, already dressed result. It is the only visual input. "
+            "Change only the environment into the selected studio and naturally match its light "
+            "direction, soft bounce and floor shadow to the existing person. Preserve that exact "
+            "person's face, hair, hands, held objects, pose, outfit silhouette, denim wash and weave, "
+            "zipper, pockets, hems and crop. Do not reconstruct the person from an earlier pose "
+            "photo, invent other clothes or copy any date stamp. The subject and studio must share "
+            "one coherent photographic lighting field, with no pasted cutout edge."
+        )
+        studio_prompt += retry_note[:800]
+    elif snapshot.get("operation") == "try_on" and (pose_reference or depth_url):
         studio_prompt += (
             " STUDIO REFINEMENT POSE LOCK: Image 1 is the already dressed person and owns the face, "
             "outfit and product details. Replace only the background and lighting. Keep the existing "
@@ -20578,7 +20774,7 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
     elapsed = float(batch.get("generation_elapsed_seconds") or 0)
     for image in images:
         studio_refs = [{"role": "source", "url": image}]
-        if snapshot.get("operation") == "try_on":
+        if snapshot.get("operation") == "try_on" and not pose_canvas:
             if pose_reference:
                 studio_refs.append({"role": "pose", "url": pose_reference["url"]})
             if depth_url:
@@ -20774,11 +20970,20 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
                      "label": "动作人物深度图", "reference_id": "try_on_derived_depth"}
         owner_index = refs.index(owner)
         refs.insert(owner_index + 1, depth_ref)
-        depth_index = owner_index + 2
-        prompt = build_ecommerce_prompt("try_on", refs, options)
+        pose_facts = {"status": "not_required"}
+        if owner.get("reference_type") == "pose" and not str(options.get("instruction") or "").strip():
+            # 把实际姿势照片放在首图作为编辑底图；身份和商品仅负责自己的区域。
+            refs = [owner, depth_ref, *[ref for ref in refs if ref is not owner and ref is not depth_ref]]
+            pose_facts = await analyze_try_on_canvas_facts(refs)
+            prompt = build_try_on_pose_canvas_prompt(refs, pose_facts)
+        else:
+            prompt = build_ecommerce_prompt("try_on", refs, options)
+        depth_index = refs.index(depth_ref) + 1
         return refs, prompt, {"status": "succeeded", "url": url, "source_url": owner["url"],
                               "reference_index": depth_index, "tier": tier,
-                              "mode": settings.get("depth_map_mode") or "person"}
+                              "mode": settings.get("depth_map_mode") or "person",
+                              "pose_canvas": bool(owner.get("reference_type") == "pose" and pose_facts.get("status") != "not_required"),
+                              "visual_facts": pose_facts}
     if snapshot.get("operation") != "universal" or options.get("generation_style") != "standard_product" or options.get("prompt_policy") in {"free", "lookbook"}:
         return refs, prompt, {"status": "not_required"}
     pose = next((item for item in refs if item.get("reference_type") == "pose"), None)
@@ -21048,24 +21253,68 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     })
 
                 generation_prompts = lookbook_generation_prompts(snapshot) if lookbook_agent else []
+                pose_canvas_mode = snapshot["operation"] == "try_on" and bool(pose_depth.get("pose_canvas"))
+                if pose_canvas_mode and (pose_depth.get("visual_facts") or {}).get("status") != "succeeded":
+                    raise ValueError("动作与服装视觉事实未能识别，已停止提交收费生图；请检查 AI 助手视觉模型")
+                try_on_quality = None
                 if story_mode:
                     update_lookbook_agent_stage(task_id, "generation", f"智能体正在生成连续故事镜头（0/{snapshot['count']}）…", 58)
                     batch = await execute_lookbook_story_batch(snapshot, route, publish_ecommerce_partial)
                 else:
-                    batch = await execute_ai_image_batch(
-                        prompt=generation_prompt,
-                        provider_id=route["provider_id"],
-                        model=route["model"],
-                        size=snapshot["size"],
-                        quality=snapshot["quality"],
-                        references=generation_refs,
-                        count=snapshot["count"],
-                        prefix="ecommerce_",
-                        allow_edit_endpoint_fallback=False,
-                        semantic_mask=True,
-                        progress_callback=publish_ecommerce_partial,
-                        prompts=generation_prompts or None,
-                    )
+                    attempts = []
+                    retry_note = ""
+                    elapsed_total = 0.0
+                    for attempt in range(3 if pose_canvas_mode else 1):
+                        if pose_canvas_mode:
+                            update_ecommerce_task(task_id, {"progress_status":
+                                f"正在生成并核对动作、身份与服装（第 {attempt + 1}/3 次）…"})
+                        batch = await execute_ai_image_batch(
+                            prompt=generation_prompt + retry_note,
+                            provider_id=route["provider_id"],
+                            model=route["model"],
+                            size=snapshot["size"],
+                            quality=snapshot["quality"],
+                            references=generation_refs,
+                            count=snapshot["count"],
+                            prefix="ecommerce_",
+                            allow_edit_endpoint_fallback=False,
+                            semantic_mask=True,
+                            progress_callback=None if pose_canvas_mode else publish_ecommerce_partial,
+                            prompts=generation_prompts or None,
+                        )
+                        elapsed_total += float(batch.get("generation_elapsed_seconds") or 0)
+                        if not pose_canvas_mode:
+                            break
+                        checks = await asyncio.gather(*(
+                            inspect_try_on_candidate(snapshot, image) for image in batch.get("images") or []
+                        ))
+                        if any(check.get("status") != "succeeded" for check in checks):
+                            raise ValueError("自由换衣视觉验收服务不可用，已停止后续付费重试")
+                        passed = bool(checks) and all(check.get("passed") for check in checks)
+                        attempts.append({"attempt": attempt + 1, "images": list(batch.get("images") or []),
+                                         "checks": checks, "passed": passed})
+                        update_ecommerce_task(task_id, {"try_on_quality": {"attempts": attempts,
+                                                                           "passed": passed}})
+                        if passed:
+                            break
+                        failed_parts = []
+                        for check in checks:
+                            if not check.get("pose_match"):
+                                failed_parts.append("match the pose canvas's exact screen-left/screen-right hand and object positions, leg crossing and crop")
+                            if not check.get("identity_match"):
+                                failed_parts.append("match the target person's face and hairstyle")
+                            for product_index, product_ok in enumerate(check.get("product_matches") or []):
+                                if not product_ok:
+                                    failed_parts.append(f"replace the old garment with product reference {product_index + 1} exactly")
+                            if not check.get("watermark_free"):
+                                failed_parts.append("remove every date stamp or watermark over the person, held object and footwear")
+                        retry_note = ("\nREGENERATE AND FIX: " + "; ".join(dict.fromkeys(failed_parts))[:700]
+                                      + ". The original reference images are authoritative for every detail.")
+                    else:
+                        raise ValueError("自由换衣候选图连续 3 次未通过动作、身份与服装核对，已停止交付错误成品")
+                    if pose_canvas_mode:
+                        try_on_quality = {"passed": True, "attempts": attempts}
+                        batch["generation_elapsed_seconds"] = round(elapsed_total, 3)
                     if pose_anchor.get("status") == "succeeded":
                         batch["generation_elapsed_seconds"] = round(float(batch.get("generation_elapsed_seconds") or 0) + float(pose_anchor.get("generation_elapsed_seconds") or 0), 3)
                 lookbook_quality = None
@@ -21083,9 +21332,46 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 if lookbook_agent:
                     # FW 风格需要真实不规则颗粒；必须在质量门重生之后再处理，避免修复图丢失 finish。
                     batch = apply_lookbook_film_finish(batch, snapshot)
-                batch = await apply_selected_studio_background(batch, snapshot, route)
+                if pose_canvas_mode and str((snapshot.get("options") or {}).get("studio_reference") or "").strip():
+                    dressed_batch = batch
+                    studio_attempts = []
+                    studio_retry_note = ""
+                    for studio_attempt in range(2):
+                        update_ecommerce_task(task_id, {"progress_status":
+                            f"正在匹配摄影棚光线并复核成品（第 {studio_attempt + 1}/2 次）…"})
+                        studio_candidate = await apply_selected_studio_background(
+                            dressed_batch, snapshot, route, studio_retry_note,
+                        )
+                        studio_checks = await asyncio.gather(*(
+                            inspect_try_on_candidate(snapshot, image, final_stage=True)
+                            for image in studio_candidate.get("images") or []
+                        ))
+                        if any(check.get("status") != "succeeded" for check in studio_checks):
+                            raise ValueError("摄影棚视觉验收服务不可用，已停止后续付费重试")
+                        studio_passed = bool(studio_checks) and all(check.get("passed") for check in studio_checks)
+                        studio_attempts.append({"attempt": studio_attempt + 1,
+                                                "images": list(studio_candidate.get("images") or []),
+                                                "checks": studio_checks, "passed": studio_passed})
+                        if studio_passed:
+                            batch = studio_candidate
+                            break
+                        studio_retry_note = (
+                            " Remove every date stamp and watermark. Keep the exact already dressed "
+                            "person, face, gestures, garments, fasteners and fabric while matching "
+                            "the studio lighting and floor shadow naturally."
+                        )
+                    else:
+                        raise ValueError("摄影棚成品连续 2 次未通过人物、服装或画面检查，已停止交付错误成品")
+                    try_on_quality["studio_attempts"] = studio_attempts
+                else:
+                    batch = await apply_selected_studio_background(batch, snapshot, route)
                 if snapshot["operation"] in {"universal", "try_on", "pose_transfer"}:
-                    batch = await apply_fabric_enhancement(snapshot["operation"], snapshot["inputs"], batch, {'infer_output_depth':snapshot['operation'] in {'universal', 'pose_transfer'}})
+                    fabric_refs = generation_refs if snapshot["operation"] == "try_on" else snapshot["inputs"]
+                    batch = await apply_fabric_enhancement(snapshot["operation"], fabric_refs, batch, {
+                        'infer_output_depth': snapshot['operation'] in {'universal', 'pose_transfer'},
+                        'product_facts': ((pose_depth.get('visual_facts') or {}).get('products') or {})
+                        if snapshot["operation"] == "try_on" else {},
+                    })
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",
@@ -21097,6 +21383,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "generation_references": generation_refs,
                     "pose_depth": pose_depth,
                     "pose_anchor": pose_anchor,
+                    "try_on_quality": try_on_quality,
                     "parent_task_id": snapshot.get("parent_task_id") or "",
                     "prompt": snapshot["prompt"],
                     "inputs": snapshot["inputs"],

@@ -13,6 +13,7 @@ from canvas_core.ecommerce import (
     build_universal_auto_instruction,
     build_model_catalog,
     build_prompt,
+    build_try_on_pose_canvas_prompt,
     parse_garment_analysis,
     parse_universal_reference_analysis,
     restrict_universal_reference_analysis,
@@ -310,6 +311,26 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("Image 3 only as the spatial / pose template", prompt)
         self.assertIn("Image 4 is a depth map extracted from Image 3", prompt)
         self.assertIn("Image 4 = [DEPTH / POSE GEOMETRY ONLY]", prompt)
+
+    def test_try_on_pose_canvas_assigns_independent_pose_identity_and_products(self):
+        refs = [
+            {"role": "pose", "reference_type": "pose", "url": "/pose"},
+            {"role": "control_map", "reference_type": "control_map", "url": "/depth"},
+            {"role": "source", "reference_type": "source", "url": "/person"},
+            {"role": "upper_garment", "reference_type": "upper_garment", "reference_id": "coat", "url": "/coat"},
+            {"role": "lower_garment", "reference_type": "lower_garment", "reference_id": "shorts", "url": "/shorts"},
+        ]
+        prompt = build_try_on_pose_canvas_prompt(refs, {"pose": {
+            "screen_left_arm_hand": "holding bottle", "legs_and_feet": "legs crossed"},
+            "products": {"coat": {"fastening": "metal zipper"}}})
+        self.assertIn("Edit Image 1 as the fixed photographic canvas", prompt)
+        self.assertIn("Image 2 is registered person depth", prompt)
+        self.assertIn("Image 3 supplies only the target person's identity", prompt)
+        self.assertIn("Image 4 is the exact upper garment product", prompt)
+        self.assertIn("Image 5 is the exact lower garment product", prompt)
+        self.assertIn("holding bottle", prompt)
+        self.assertIn("metal zipper", prompt)
+        self.assertIn("Date stamps, watermarks", prompt)
 
     def test_try_on_detail_is_bound_to_its_outfit_reference(self):
         references = [
@@ -1066,6 +1087,42 @@ class EcommerceBackendTests(unittest.TestCase):
     def make_image(self, path: Path, size=(100, 80), image_format="PNG"):
         Image.new("RGB", size, "white").save(path, image_format)
 
+    def test_try_on_pose_canvas_studio_uses_only_approved_image(self):
+        async def fake_batch(**kwargs):
+            self.assertEqual([ref["url"] for ref in kwargs["references"]], ["/assets/output/dressed.png"])
+            self.assertIn("one coherent photographic lighting field", kwargs["prompt"])
+            return {"images": ["/assets/output/studio.png"], "image_items": [{"url": "/assets/output/studio.png"}],
+                    "generation_elapsed_seconds": 1}
+
+        snapshot = {"operation": "try_on", "options": {"studio_reference": "studio_warm"},
+                    "inputs": [{"role": "pose", "url": "/assets/input/pose.png"}],
+                    "pose_depth": {"pose_canvas": True, "url": "/assets/output/depth.png"},
+                    "size": "1024x1024", "quality": "high"}
+        batch = {"images": ["/assets/output/dressed.png"], "generation_elapsed_seconds": 2}
+        with (patch.object(self.main, "build_ecommerce_prompt", return_value="Replace background."),
+              patch.object(self.main, "execute_ai_image_batch", new=AsyncMock(side_effect=fake_batch))):
+            result = asyncio.run(self.main.apply_selected_studio_background(batch, snapshot, {"provider_id": "test", "model": "test"}))
+        self.assertEqual(result["images"], ["/assets/output/studio.png"])
+
+    def test_try_on_visual_gate_rejects_missing_product(self):
+        snapshot = {"inputs": [
+            {"reference_type": "pose", "url": "/pose"},
+            {"reference_type": "source", "url": "/person"},
+            {"reference_type": "upper_garment", "url": "/jacket"},
+            {"reference_type": "lower_garment", "url": "/shorts"},
+        ]}
+        route = {"provider_id": "vision", "model": "test"}
+        async def fake_llm(request):
+            self.assertEqual(request.images, ["/candidate", "/pose", "/person", "/jacket", "/shorts"])
+            return {"text": '{"pose_match":true,"identity_match":true,"product_matches":[false,true],"watermark_free":true,'
+                            '"all_passed":false,"issues":["jacket missing"]}'}
+        with (patch.object(self.main, "configured_ecommerce_vision_route", return_value=route),
+              patch.object(self.main, "canvas_llm", new=AsyncMock(side_effect=fake_llm))):
+            checked = asyncio.run(self.main.inspect_try_on_candidate(snapshot, "/candidate"))
+        self.assertFalse(checked["passed"])
+        self.assertEqual(checked["product_matches"], [False, True])
+        self.assertEqual(checked["issues"], ["jacket missing"])
+
     def test_try_on_studio_refinement_keeps_pose_and_depth_references(self):
         async def fake_batch(**kwargs):
             self.assertEqual([ref["role"] for ref in kwargs["references"]], ["source", "pose", "control_map"])
@@ -1104,14 +1161,20 @@ class EcommerceBackendTests(unittest.TestCase):
                     patch.object(self.main, "output_file_from_url", return_value=str(path)),
                     patch.object(self.main, "read_app_config", return_value={"depth_map_mode": "person"}),
                     patch.object(self.main, "render_try_on_depth", new=AsyncMock(return_value=(depth.read_bytes(), "quality"))) as estimate,
+                    patch.object(self.main, "analyze_try_on_canvas_facts", new=AsyncMock(return_value={
+                        "status": "succeeded", "pose": {"legs_and_feet": "legs crossed"}, "products": {}})),
                     patch.object(self.main, "media_url_from_path", side_effect=lambda filename: "/output/" + Path(filename).name),
                 ):
                     refs, prompt, audit = await self.main.prepare_universal_pose_depth(snapshot)
-                owner_index = 2 if include_pose else 0
-                self.assertEqual(refs[owner_index + 1]["role"], "control_map")
-                self.assertEqual(audit["source_url"], inputs[owner_index]["url"])
-                self.assertEqual(audit["reference_index"], owner_index + 2)
-                self.assertIn(f"Image {owner_index + 2} is a depth map extracted from Image {owner_index + 1}", prompt)
+                self.assertEqual(refs[1]["role"], "control_map")
+                self.assertEqual(audit["source_url"], inputs[2 if include_pose else 0]["url"])
+                self.assertEqual(audit["reference_index"], 2)
+                if include_pose:
+                    self.assertEqual([ref["role"] for ref in refs], ["pose", "control_map", "source", "upper_garment"])
+                    self.assertIn("legs crossed", prompt)
+                    self.assertTrue(audit["pose_canvas"])
+                else:
+                    self.assertIn("Image 2 is a depth map extracted from Image 1", prompt)
                 estimate.assert_awaited_once_with(str(path), {"depth_map_mode": "person"})
         asyncio.run(run_case(False))
         asyncio.run(run_case(True))

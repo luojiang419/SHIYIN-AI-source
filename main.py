@@ -20559,17 +20559,37 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
         [{"role": "source", "url": image} for image in images],
         {"background_mode": "preset", "background_preset": "studio_white", "studio_reference": studio_reference},
     )
+    pose_reference = next((ref for ref in snapshot.get("inputs") or []
+                           if ref.get("reference_type") == "pose" or ref.get("role") == "pose"), None)
+    depth_url = str((snapshot.get("pose_depth") or {}).get("url") or "")
+    if snapshot.get("operation") == "try_on" and (pose_reference or depth_url):
+        studio_prompt += (
+            " STUDIO REFINEMENT POSE LOCK: Image 1 is the already dressed person and owns the face, "
+            "outfit and product details. Replace only the background and lighting. Keep the existing "
+            "joint positions, hand gestures, leg crossing, body orientation, subject scale and crop."
+        )
+        if pose_reference:
+            studio_prompt += " Image 2 is the original pose reference; preserve its non-mirrored limb order and action."
+        if depth_url:
+            studio_prompt += (f" Image {3 if pose_reference else 2} is the registered person depth map; use its geometry only to "
+                              "prevent pose drift, never render its grayscale.")
     refined_images: List[str] = []
     refined_items: List[Dict[str, Any]] = []
     elapsed = float(batch.get("generation_elapsed_seconds") or 0)
     for image in images:
+        studio_refs = [{"role": "source", "url": image}]
+        if snapshot.get("operation") == "try_on":
+            if pose_reference:
+                studio_refs.append({"role": "pose", "url": pose_reference["url"]})
+            if depth_url:
+                studio_refs.append({"role": "control_map", "url": depth_url})
         refined = await execute_ai_image_batch(
             prompt=studio_prompt,
             provider_id=route["provider_id"],
             model=route["model"],
             size=snapshot["size"],
             quality=snapshot["quality"],
-            references=[{"role": "source", "url": image}],
+            references=studio_refs,
             count=1,
             prefix="ecommerce_studio_",
             allow_edit_endpoint_fallback=False,

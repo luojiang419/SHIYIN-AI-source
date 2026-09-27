@@ -49,7 +49,13 @@ def _work_item_id(history_id: str, index: int, url: str) -> str:
 
 
 def _history_images(record: dict[str, Any]) -> list[str]:
-    return [_text(url, 2000) for url in record.get("images") or [] if _text(url, 2000)]
+    images = [_text(url, 2000) for url in record.get("images") or [] if _text(url, 2000)]
+    for item in record.get("image_items") or []:
+        if isinstance(item, dict):
+            url = _text(item.get("url"), 2000)
+            if url and url not in images:
+                images.append(url)
+    return images
 
 
 def _history_params(record: dict[str, Any]) -> dict[str, Any]:

@@ -293,8 +293,8 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual([item["role"] for item in normalized], ["source", "model_identity", "upper_garment", "detail", "pose"])
         prompt = build_prompt("try_on", references, {})
         self.assertIn("Use Image 2 only as face identity", prompt)
-        self.assertIn("Preserve the source person's body shape, limb proportions, original hair, hairstyle, hair color, non-face skin", prompt)
-        self.assertIn("without copying its hair, body pose, clothing, accessories, background, or framing", prompt)
+        self.assertIn("The pose reference overrides the source body action, joint positions", prompt)
+        self.assertIn("without copying its hair, pose, clothing, background or framing", prompt)
         self.assertIn("Use Image 5 only as the spatial / pose template", prompt)
         self.assertIn("Use detail references only to refine corresponding garment or product fidelity", prompt)
         self.assertIn("without changing body identity, pose, framing, or unrelated garment regions", prompt)
@@ -1065,6 +1065,24 @@ class EcommerceBackendTests(unittest.TestCase):
 
     def make_image(self, path: Path, size=(100, 80), image_format="PNG"):
         Image.new("RGB", size, "white").save(path, image_format)
+
+    def test_try_on_studio_refinement_keeps_pose_and_depth_references(self):
+        async def fake_batch(**kwargs):
+            self.assertEqual([ref["role"] for ref in kwargs["references"]], ["source", "pose", "control_map"])
+            self.assertIn("Image 2 is the original pose reference", kwargs["prompt"])
+            self.assertIn("Image 3 is the registered person depth map", kwargs["prompt"])
+            return {"images": ["/assets/output/studio.png"], "image_items": [{"url": "/assets/output/studio.png"}],
+                    "generation_elapsed_seconds": 1}
+
+        snapshot = {"operation": "try_on", "options": {"studio_reference": "studio_white"},
+                    "inputs": [{"role": "pose", "url": "/assets/input/pose.png"}],
+                    "pose_depth": {"url": "/assets/output/depth.png"}, "size": "1024x1024", "quality": "high"}
+        batch = {"images": ["/assets/output/initial.png"], "generation_elapsed_seconds": 2}
+        with (patch.object(self.main, "build_ecommerce_prompt", return_value="Replace background."),
+              patch.object(self.main, "execute_ai_image_batch", new=AsyncMock(side_effect=fake_batch))):
+            result = asyncio.run(self.main.apply_selected_studio_background(batch, snapshot, {"provider_id": "test", "model": "test"}))
+        self.assertEqual(result["images"], ["/assets/output/studio.png"])
+        self.assertEqual(result["generation_elapsed_seconds"], 3)
 
     def test_try_on_background_depth_is_submitted_next_to_pose_or_source(self):
         async def run_case(include_pose):

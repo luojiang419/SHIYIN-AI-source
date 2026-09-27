@@ -10,11 +10,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from canvas_core.database import CanvasDatabase
+from canvas_core.database import CanvasDatabase, _history_images
 from starlette.requests import Request
 
 
 class WorksFrontendContractTests(unittest.TestCase):
+    def test_history_index_collects_image_items_without_duplicate_urls(self):
+        self.assertEqual(_history_images({"images": ["/output/a.png"], "image_items": [
+            {"url": "/output/a.png"}, {"url": "/output/b.png"}]}),
+            ["/output/a.png", "/output/b.png"])
+
     @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parent.parent

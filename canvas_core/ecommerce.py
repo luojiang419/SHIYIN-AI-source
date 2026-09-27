@@ -1852,6 +1852,19 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             if studio_background_selected
             else " Preserve the source person's pose, hands, framing, lighting, and background."
         )
+        if pose_index:
+            # 独立姿势图负责动作和取景；人物图只负责身份和身体特征。
+            source_instruction = (
+                "Use the source image only for the final person's identity, face, hair, skin tone, "
+                "body proportions and recognizable features. The pose reference overrides the source "
+                "body action, joint positions, head direction, camera viewpoint, framing and subject placement. "
+                "Do not retain a conflicting source pose or crop."
+            )
+            if identity_index:
+                source_instruction += (
+                    f" Use Image {identity_index} only as face identity: transfer recognizable facial features "
+                    "inside the facial region without copying its hair, pose, clothing, background or framing."
+                )
         if depth_index:
             owner_index = pose_index or next((index + 1 for index, item in enumerate(normalized) if item["role"] == "source"), 1)
             pose_instruction += (

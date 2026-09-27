@@ -320,6 +320,12 @@
     }
     let worksLoadId = 0;
     let worksLoadController = null;
+    let lastForegroundRefresh = 0;
+    function refreshOnForeground(){
+        if(document.hidden || Date.now()-lastForegroundRefresh<1500) return;
+        lastForegroundRefresh=Date.now();
+        void loadWorks({reset:true,preserve:true});
+    }
     const completedPageCursors = new Set();
     async function loadWorks({reset=false,preserve=false}={}){
         if(state.loading && !reset) return;
@@ -662,6 +668,11 @@
         document.addEventListener('keydown',event=>{if(event.key==='Shift')state.shiftPressed=true;});
         document.addEventListener('keyup',event=>{if(event.key==='Shift')state.shiftPressed=false;});
         window.addEventListener('blur',()=>{state.shiftPressed=false;});
+        window.addEventListener('focus',refreshOnForeground);
+        document.addEventListener('visibilitychange',refreshOnForeground);
+        setInterval(()=>{
+            if(!document.hidden && (!window.frameElement || window.frameElement.getClientRects().length)) refreshOnForeground();
+        },15000);
     }
     document.addEventListener('DOMContentLoaded',async ()=>{
         cache();bind();
@@ -683,5 +694,6 @@
             renderVirtual(true);el.worksGrid.scrollTop=saved.scroll || 0;renderVirtual(true);
         });
         void loadWorks({reset:true,preserve:Boolean(restored)});
+        lastForegroundRefresh=Date.now();
     });
 })();

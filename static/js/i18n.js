@@ -1,5 +1,5 @@
 (function(){
-    const VERSION = '2026.08.09.universal-routes.1';
+    const VERSION = '2026.09.27.pose-reference-labels.1';
     const scripts = [
         '/static/js/i18n-core.js',
         '/static/js/i18n/common.js',

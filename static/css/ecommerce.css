@@ -3012,6 +3012,21 @@ html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(
     margin-top:16px;
 }
 
+/* 动作迁移的操作区贴住可滚动素材栏底部，宽度跟随左栏。 */
+.ec-page.is-pose-transfer .ec-control-panel {
+    padding-bottom:22px;
+}
+.ec-page.is-pose-transfer #controlActionMount {
+    position:sticky;
+    bottom:0;
+    z-index:2;
+    margin-top:16px;
+}
+.ec-page.is-pose-transfer .ec-generate-actions {
+    position:static;
+    width:auto;
+}
+
 /* 醇白主题最终收口：覆盖浅色品牌收口中的暖棕渐变，保持 Infinite Canvas 的中性黑白层次。 */
 html.studio-theme-pure-white:not(.studio-theme-dark):not(.theme-dark),
 html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) {

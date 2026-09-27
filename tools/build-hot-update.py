@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import marshal
 import os
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ import sys
 import time
 import urllib.request
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -75,6 +77,46 @@ def backend_supports_current_topaz_models(executable):
         return False
 
 
+def frozen_main_layers(main_module):
+    """读取常规 main，或定向热修包装器中的原 main 与覆盖函数。"""
+    layers = [main_module]
+    for value in main_module.co_consts:
+        if isinstance(value, bytes):
+            try:
+                original = marshal.loads(zlib.decompress(value))
+            except (ValueError, TypeError, zlib.error):
+                continue
+            if hasattr(original, 'co_consts') and original.co_filename == 'main.py':
+                layers.insert(0, original)
+        elif isinstance(value, str) and 'def prepare_universal_pose_depth(' in value:
+            layers.append(compile(value, 'main.py', 'exec'))
+    return layers
+
+
+def try_on_depth_helpers_available(main_module):
+    layers = frozen_main_layers(main_module)
+    functions = {}
+    for layer in layers:
+        functions.update({value.co_name: value for value in layer.co_consts if hasattr(value, 'co_name')})
+    prepare = functions.get('prepare_universal_pose_depth')
+    if prepare is None or 'render_try_on_depth' not in prepare.co_names:
+        return False
+    local = {value.co_name: value for value in prepare.co_consts if hasattr(value, 'co_name')}
+    render = local.get('render_try_on_depth') or functions.get('render_try_on_depth')
+    return bool(render and ('adjust_try_on_depth' in local or 'adjust_try_on_depth' in functions))
+
+
+def backend_supports_try_on_depth(executable):
+    if not executable.is_file():
+        return False
+    try:
+        from PyInstaller.archive.readers import CArchiveReader
+        archive = CArchiveReader(str(executable)).open_embedded_archive('PYZ.pyz')
+        return try_on_depth_helpers_available(archive.extract('main'))
+    except (OSError, AttributeError, KeyError, ValueError, SyntaxError):
+        return False
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--version', default=time.strftime('%Y%m%d%H%M%S'))
@@ -115,6 +157,8 @@ def main():
             prepared.extract('main')
         except (OSError, ValueError, KeyError) as error:
             raise ValueError('指定后端缺失或冻结归档损坏') from error
+        if not backend_supports_try_on_depth(backend/'canvas-backend.exe'):
+            raise ValueError('指定后端缺少自由换衣深度生成辅助函数')
     if sum((args.bootstrap, args.updater_only, args.web_only)) > 1:
         raise ValueError('--bootstrap、--updater-only 与 --web-only 不能同时使用')
     if not args.web_only:
@@ -122,12 +166,15 @@ def main():
             run(['cargo','build','--release','--manifest-path','src-tauri/Cargo.toml']);state['desktop']=desktop_hash
         if not args.backend_dir and not args.bootstrap and not args.updater_only and (
             state.get('backend')!=backend_hash or not backend_supports_current_topaz_models(backend/'canvas-backend.exe')
+            or not backend_supports_try_on_depth(backend/'canvas-backend.exe')
         ):
             # PyInstaller可能把语法错误的main当成不可导入模块而继续产出EXE。
             run([sys.executable,'-m','compileall','-q','main.py','backend_entry.py','canvas_core'])
             run([sys.executable,'-m','PyInstaller','--noconfirm','--distpath','dist/hot-backend','--workpath','.build/hot-backend','canvas-backend.spec']);state['backend']=backend_hash
             if not backend_supports_current_topaz_models(backend/'canvas-backend.exe'):
                 raise RuntimeError('热更新后端仍缺少 Topaz Video 新版模型目录检测，请清理 PyInstaller 缓存后重建')
+            if not backend_supports_try_on_depth(backend/'canvas-backend.exe'):
+                raise RuntimeError('热更新后端缺少自由换衣深度生成辅助函数，请检查 PyInstaller 构建输入')
     snapshot=ROOT/'dist/hot-update'/args.version
     snapshot.mkdir(parents=True,exist_ok=False)
     files=snapshot/'files'

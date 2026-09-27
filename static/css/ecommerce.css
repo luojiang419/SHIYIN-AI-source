@@ -68,6 +68,7 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-control-panel, .ec-result-panel { min-height:0; height:100%; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; border:1px solid var(--ec-border); border-radius:var(--ec-radius); background:var(--ec-panel); box-shadow:var(--ec-shadow); }
 .ec-result-panel { background:var(--ec-result-panel-bg); }
 .ec-control-panel { padding:22px 22px 104px; }
+.ec-control-content { display:contents; }
 .ec-result-panel { padding:22px; }
 .ec-result-body { min-height:0; }
 .ec-section-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
@@ -3012,19 +3013,28 @@ html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(
     margin-top:16px;
 }
 
-/* 动作迁移的操作区贴住可滚动素材栏底部，宽度跟随左栏。 */
+/* 动作迁移把输入滚动区与底部操作区分开，素材不会从按钮下方穿过。 */
 .ec-page.is-pose-transfer .ec-control-panel {
+    display:grid;
+    grid-template-rows:minmax(0,1fr) auto;
+    gap:12px;
+    overflow:hidden;
     padding-bottom:22px;
 }
+.ec-page.is-pose-transfer .ec-control-content {
+    display:block;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+}
 .ec-page.is-pose-transfer #controlActionMount {
-    position:sticky;
-    bottom:0;
-    z-index:2;
-    margin-top:16px;
+    min-width:0;
+    margin:0;
 }
 .ec-page.is-pose-transfer .ec-generate-actions {
     position:static;
-    width:auto;
+    width:100%;
 }
 
 /* 醇白主题最终收口：覆盖浅色品牌收口中的暖棕渐变，保持 Infinite Canvas 的中性黑白层次。 */

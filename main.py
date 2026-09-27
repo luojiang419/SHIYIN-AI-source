@@ -20900,13 +20900,7 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
         owner_index = refs.index(owner)
         refs.insert(owner_index + 1, depth_ref)
         pose_facts = {"status": "not_required"}
-        if owner.get("reference_type") == "pose" and not str(options.get("instruction") or "").strip():
-            # 把实际姿势照片放在首图作为编辑底图；身份和商品仅负责自己的区域。
-            refs = [owner, depth_ref, *[ref for ref in refs if ref is not owner and ref is not depth_ref]]
-            pose_facts = await analyze_try_on_canvas_facts(refs)
-            prompt = build_try_on_pose_canvas_prompt(refs, pose_facts)
-        else:
-            prompt = build_ecommerce_prompt("try_on", refs, options)
+        prompt = build_ecommerce_prompt("try_on", refs, options)
         depth_index = refs.index(depth_ref) + 1
         return refs, prompt, {"status": "succeeded", "url": url, "source_url": owner["url"],
                               "reference_index": depth_index, "tier": tier,
@@ -21025,6 +21019,105 @@ async def prepare_universal_product_anchor(snapshot, route, references, prompt):
     return final_refs, final_prompt, {'status':'succeeded', 'url':anchor_url, 'prompt':anchor_prompt, 'references':anchor_refs, 'generation_elapsed_seconds':batch.get('generation_elapsed_seconds',0), **reuse_audit}
 
 
+async def prepare_try_on_product_edit(task_id, snapshot, route, references):
+    """先确定人物与摄影，再换商品；成衣之后不再提交背景重绘。"""
+    from canvas_core.try_on_pipeline import compile_outfit_edit, original_reference_map, role
+    source = next(ref for ref in references if role(ref) == "source")
+    pose = next((ref for ref in references if role(ref) == "pose"), None)
+    identity = next((ref for ref in references if role(ref) == "model_identity"), None)
+    depth = next(ref for ref in references if role(ref) == "control_map")
+    options = snapshot.get("options") or {}
+    studio = str(options.get("studio_reference") or "")
+    audit = {"status": "not_required", "pipeline": "try-on.product-edit.v1", "studio_prepared": bool(studio)}
+    base = dict(source)
+    if pose or identity or studio:
+        update_ecommerce_task(task_id, {"progress_status": "正在准备人物、动作与摄影底图（尚未换衣）…"})
+        anchor_refs = [source]
+        lines = ["只生成一张真实人物摄影底图，商品换装由下一阶段处理。不要美化换脸或添加饰品。"]
+        if pose:
+            anchor_refs = [pose, source, depth]
+            lines.append("图1是固定编辑底图，严格保留其每个关节位置、交叉腿顺序、脚的落点、肩髋倾斜、"
+                         "左右手势、持物、头部朝向、机位、裁切和主体占比。图3是图1的深度。"
+                         "只将图1人物替换为图2的同一张脸、发型发色、肤色与身体特征。"
+                         "图2绝不提供动作、衣物、鞋、手袋、其他配饰或背景；不要复制其普通站姿。"
+                         "暂时保留图1原有衣物、鞋和持物，这些服装稍后会替换；禁止镜像、取消交叉腿或移动脚。"
+                         "删除图1日期水印。身份只来自图2，不能保留图1人物的脸或黑发。")
+        else:
+            lines.append("图1是唯一人物身份来源，保留同一张脸、发型发色、肤色、身体比例和原衣物。"
+                         "保持图1原动作、手势、鞋、持物、机位、裁切与主体占比。")
+        if identity:
+            anchor_refs.append(identity)
+            lines.append(f"图{len(anchor_refs)}仅替代面部身份，发型身体仍来自人物来源图，动作来源不变。")
+        if studio:
+            # 这里只借用影棚环境描述。完整换背景模板会锁死图1的脸，
+            # 与上面的“图2负责身份”直接冲突。
+            from canvas_core.ecommerce import build_studio_reference_lock
+            lines.append(build_studio_reference_lock(options))
+        else:
+            lines.append("保留底图原背景，以动作需要补齐遮挡与接触阴影，不另造环境。")
+        for index, ref in enumerate(anchor_refs, 1):
+            if ref.get("instruction"):
+                lines.append(f"图{index}的局部要求：{ref['instruction']}")
+        anchor_prompt = "\n".join(lines)
+        batch = await execute_ai_image_batch(
+            prompt=anchor_prompt, provider_id=route["provider_id"], model=route["model"],
+            size=snapshot["size"], quality=snapshot["quality"], references=anchor_refs,
+            count=1, prefix="try_on_anchor_", allow_edit_endpoint_fallback=False, semantic_mask=True,
+        )
+        anchor_url = (batch.get("images") or [""])[0]
+        if not anchor_url:
+            raise ValueError("人物底图未返回图片，已停止商品换装")
+        base = {"role": "source", "reference_type": "source", "reference_id": "try_on_anchor", "url": anchor_url}
+        update_ecommerce_task(task_id, {"progress_status": "正在从新底图提取深度，锁定最终换衣构图…"})
+        content, tier = await render_try_on_depth(output_file_from_url(anchor_url), read_app_config(APP_PATHS.data_root))
+        path = Path(OUTPUT_OUTPUT_DIR) / f"try_on_edit_depth_{uuid.uuid4().hex}.png"
+        path.write_bytes(content)
+        depth = {"role": "control_map", "reference_type": "control_map", "reference_id": "try_on_edit_depth", "url": media_url_from_path(str(path))}
+        audit.update(status="succeeded", url=anchor_url, prompt=anchor_prompt, references=anchor_refs,
+                     generation_elapsed_seconds=batch.get("generation_elapsed_seconds", 0),
+                     edit_depth={"url": depth["url"], "source_url": anchor_url, "tier": tier})
+        update_ecommerce_task(task_id, {"pose_anchor": dict(audit)})
+    ratio = str(snapshot.get("aspect_ratio") or "source")
+    if ratio == "source":
+        ratio = resolve_pose_replicate_aspect_ratio(ratio, base["url"])
+    from canvas_core.ecommerce import TRY_ON_OUTFIT_ROLES
+    products = [ref for ref in references if role(ref) in TRY_ON_OUTFIT_ROLES]
+    steps = []
+    for product_index, product in enumerate(products):
+        owned = [product, *[ref for ref in references if role(ref) == "detail"
+                           and ref.get("detail_target_id") == product.get("reference_id")]]
+        final_refs, prompt, template = compile_outfit_edit(base, depth, owned, ratio, str(options.get("instruction") or ""))
+        prompt += "\n" + original_reference_map(snapshot["inputs"], final_refs)
+        prompt += "\n本轮只替换当前指定单品，其他已穿好的商品、内搭、皮肤、手臂、鞋和背景全部保留图1；不得新增背心、内搭或将下装面料用于躯干。"
+        update_ecommerce_task(task_id, {"progress_status": f"正在还原第 {product_index + 1}/{len(products)} 件商品的款式与面料…"})
+        if product_index == len(products) - 1:
+            break
+        dressed = await execute_ai_image_batch(
+            prompt=prompt, provider_id=route["provider_id"], model=route["model"],
+            size=snapshot["size"], quality=snapshot["quality"], references=final_refs,
+            count=1, prefix="try_on_product_", allow_edit_endpoint_fallback=False, semantic_mask=True,
+        )
+        output = (dressed.get("images") or [""])[0]
+        if not output:
+            raise ValueError("单品换装未返回图片，已停止后续换装")
+        steps.append({"product_id": product.get("reference_id"), "url": output,
+                      "prompt": prompt, "references": final_refs, "template": template})
+        audit["generation_elapsed_seconds"] = float(audit.get("generation_elapsed_seconds") or 0) + float(dressed.get("generation_elapsed_seconds") or 0)
+        update_ecommerce_task(task_id, {"pose_anchor": {**audit, "product_steps": list(steps)}})
+        base = {"role": "source", "reference_type": "source", "reference_id": "try_on_dressed_base", "url": output}
+        content, tier = await render_try_on_depth(output_file_from_url(output), read_app_config(APP_PATHS.data_root))
+        path = Path(OUTPUT_OUTPUT_DIR) / f"try_on_product_depth_{uuid.uuid4().hex}.png"
+        path.write_bytes(content)
+        depth = {"role": "control_map", "reference_type": "control_map", "reference_id": "try_on_product_depth", "url": media_url_from_path(str(path))}
+    if steps:
+        audit["status"] = "succeeded"
+    audit["product_steps"] = steps
+    audit["final_product_id"] = products[-1].get("reference_id")
+    audit["product_edit_template"] = template
+    update_ecommerce_task(task_id, {"progress_status": f"正在还原第 {len(products)}/{len(products)} 件商品的款式与面料…"})
+    return final_refs, prompt, audit
+
+
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
     lookbook_agent = is_lookbook_snapshot(snapshot)
@@ -21088,7 +21181,10 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                                        "progress_status": "正在生成最终换衣图…" if snapshot["operation"] == "try_on" else ""})
         for index, route in enumerate(routes):
             try:
-                generation_refs, generation_prompt, pose_anchor = await prepare_universal_product_anchor(snapshot, route, prepared_refs, prepared_prompt)
+                if snapshot["operation"] == "try_on":
+                    generation_refs, generation_prompt, pose_anchor = await prepare_try_on_product_edit(task_id, snapshot, route, prepared_refs)
+                else:
+                    generation_refs, generation_prompt, pose_anchor = await prepare_universal_product_anchor(snapshot, route, prepared_refs, prepared_prompt)
                 update_ecommerce_task(task_id, {"pose_anchor": pose_anchor, "generation_prompt": generation_prompt, "generation_references": generation_refs})
                 partial_images: List[str] = []
                 partial_items: List[Dict[str, Any]] = []
@@ -21217,9 +21313,10 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 if lookbook_agent:
                     # FW 风格需要真实不规则颗粒；必须在质量门重生之后再处理，避免修复图丢失 finish。
                     batch = apply_lookbook_film_finish(batch, snapshot)
-                batch = await apply_selected_studio_background(batch, snapshot, route)
+                if snapshot["operation"] != "try_on":
+                    batch = await apply_selected_studio_background(batch, snapshot, route)
                 if snapshot["operation"] in {"universal", "try_on", "pose_transfer"}:
-                    fabric_refs = generation_refs if snapshot["operation"] == "try_on" else snapshot["inputs"]
+                    fabric_refs = [*snapshot["inputs"], *[ref for ref in generation_refs if ref.get("role") == "control_map"]] if snapshot["operation"] == "try_on" else snapshot["inputs"]
                     batch = await apply_fabric_enhancement(snapshot["operation"], fabric_refs, batch, {
                         'infer_output_depth': snapshot['operation'] in {'universal', 'pose_transfer'},
                         'product_facts': ((pose_depth.get('visual_facts') or {}).get('products') or {})

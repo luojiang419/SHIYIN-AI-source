@@ -2060,7 +2060,8 @@
         const task = guideOwnedByCurrentTask ? guide.task : null;
         const guideError = guideOwnedByCurrentTask ? guide.error : '';
         const image = task?.result?.images?.[0] || '';
-        const waitingForTryOn = Boolean(guideOwnedByCurrentTask && guideOwnerId && !currentOptions().guide_task_id && !guide.submitting);
+        const wantsGuide = currentOptions().guide_style !== 'none';
+        const waitingForTryOn = Boolean(wantsGuide && guideOwnedByCurrentTask && guideOwnerId && !currentOptions().guide_task_id && !guide.submitting);
         const running = waitingForTryOn || (guideOwnedByCurrentTask && guide.submitting) || ['queued','running'].includes(task?.status);
         const tryOnTask = state.currentTask;
         const tryOnImage = tryOnTask?.result?.images?.[state.selectedOutput] || '';
@@ -2117,7 +2118,7 @@
                 ['guide','搭配卡',image,guideError || (waitingForTryOn ? '等待换衣图' : (running ? '生成中' : '等待生成'))],
                 ['tryon','最终换衣图',tryOnImage,tryOnTask?.status === 'failed' ? '生成失败' : (tryOnTask?.status === 'succeeded' ? '已完成' : '生成中')],
             ];
-            gallery.innerHTML = works.map(([view,label,url,emptyText]) => `<button type="button" data-tryon-result-view="${view}" aria-pressed="${view === (showingGuide ? 'guide' : 'tryon')}" ${view === 'guide' && !url ? 'disabled' : ''}><span class="ec-tryon-gallery-thumb">${url ? `<img src="${escapeHtml(url)}" alt="">` : ''}</span><span class="ec-tryon-gallery-copy"><strong>${label}</strong><small>${url ? '点击查看大图' : escapeHtml(emptyText)}</small></span></button>`).join('');
+            gallery.innerHTML = works.filter(([view]) => wantsGuide || view === 'tryon').map(([view,label,url,emptyText]) => `<button type="button" data-tryon-result-view="${view}" aria-pressed="${view === (showingGuide ? 'guide' : 'tryon')}" ${view === 'guide' && !url ? 'disabled' : ''}><span class="ec-tryon-gallery-thumb">${url ? `<img src="${escapeHtml(url)}" alt="">` : ''}</span><span class="ec-tryon-gallery-copy"><strong>${label}</strong><small>${url ? '点击查看大图' : escapeHtml(emptyText)}</small></span></button>`).join('');
             gallery.querySelectorAll('[data-tryon-result-view]').forEach(button => {
                 button.addEventListener('click', () => {
                     if(button.dataset.tryonResultView === 'guide' && !image) return;
@@ -2136,7 +2137,7 @@
             : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guideError || (waitingForTryOn ? '换衣图完成后生成模特搭配卡…' : (running ? '正在生成模特搭配卡…' : '等待开始生成。')))}</p>`;
         panel.querySelector('[data-export-tryon-guide]')?.addEventListener('click', exportTryOnGuide);
         panel.querySelector('[data-open-guide-fullscreen]')?.addEventListener('click', event => openTryOnResultViewer(image, '模特搭配卡', event.currentTarget));
-        if(guideOwnedByCurrentTask && !task && (currentOptions().guide_task_id || guideOwnerId) && !guide.loading && !guide.submitting && !guide.timer && !guide.error) scheduleTryOnGuidePoll();
+        if(wantsGuide && guideOwnedByCurrentTask && !task && (currentOptions().guide_task_id || guideOwnerId) && !guide.loading && !guide.submitting && !guide.timer && !guide.error) scheduleTryOnGuidePoll();
     }
 
     function buildTryOnGuidePrompt(style, references, requirement){
@@ -2231,6 +2232,10 @@
                 storeTask(sourceTask);
                 if(taskIdOf(state.currentTask) === sourceId) renderTaskResult(sourceTask);
                 if(['queued','running'].includes(sourceTask.status)) scheduleTryOnGuidePoll();
+                else if(sourceTask.status === 'succeeded' && state.options.try_on.guide_style === 'none') {
+                    guide.view = 'tryon';
+                    syncTryOnGuidePanel();
+                }
                 else if(sourceTask.status === 'succeeded') await generateTryOnGuide(state.options.try_on.guide_style || 'editorial_model', sourceTask);
                 else {
                     state.options.try_on.guide_source_task_id = '';
@@ -2837,11 +2842,17 @@
             ['editorial_silhouette','服装人形陈列','服装组成无真人造型，左右陈列单品','/static/images/tryon-style-silhouette.jpg'],
             ['editorial_model','真人模特画报','真人模特穿搭居中，左右陈列单品','/static/images/tryon-style-model.jpg'],
         ];
-        dialog.innerHTML = `<header><div><small>OUTFIT CARD STYLE</small><h2 id="tryOnStyleTitle">选择搭配卡样式</h2><p>会同时生成最终换衣图和搭配卡</p></div><button type="button" data-close-tryon-style aria-label="关闭">×</button></header><div class="ec-tryon-style-grid">${styles.map(([id,title,hint,src]) => `<button type="button" data-tryon-guide-style="${id}" aria-pressed="${selected === id}"><img src="${src}" alt="${title}样式示例"><strong>${title}</strong><span>${hint}</span></button>`).join('')}</div>`;
+        dialog.innerHTML = `<header><div><small>OUTFIT CARD STYLE</small><h2 id="tryOnStyleTitle">选择生成内容</h2><p>${tryOnOutfitCount()} 件单品逐件换装；搭配卡为可选附加作品</p></div><button type="button" data-close-tryon-style aria-label="关闭">×</button></header><div class="ec-tryon-style-grid">${styles.map(([id,title,hint,src]) => `<button type="button" data-tryon-guide-style="${id}" aria-pressed="${selected === id}"><img src="${src}" alt="${title}样式示例"><strong>${title}</strong><span>${hint}</span></button>`).join('')}</div><button type="button" data-tryon-only class="ec-btn ec-btn-primary">仅生成换衣图（推荐）</button>`;
         document.body.appendChild(dialog);
         dialog.addEventListener('close', () => { dialog.remove(); el.generateButton.focus(); }, {once:true});
         dialog.querySelector('[data-close-tryon-style]').addEventListener('click', () => dialog.close());
         dialog.addEventListener('click', event => { if(event.target === dialog) dialog.close(); });
+        dialog.querySelector('[data-tryon-only]').addEventListener('click', () => {
+            currentOptions().guide_style = 'none';
+            persistSettings();
+            dialog.close();
+            void createTask('', 'none');
+        });
         dialog.querySelectorAll('[data-tryon-guide-style]').forEach(button => button.addEventListener('click', () => {
             const style = button.dataset.tryonGuideStyle;
             currentOptions().guide_style = style;
@@ -4366,14 +4377,14 @@
                 state.tryOnGuide.timer = null;
                 state.tryOnGuide.task = null;
                 state.tryOnGuide.error = '';
-                state.tryOnGuide.view = 'guide';
+                state.tryOnGuide.view = guideStyle === 'none' ? 'tryon' : 'guide';
                 state.tryOnGuide.compare = false;
                 currentOptions().guide_task_id = '';
                 currentOptions().guide_source_task_id = taskIdOf(stored);
                 currentOptions().guide_style = guideStyle || currentOptions().guide_style || 'editorial_model';
                 persistSettings();
                 syncTryOnGuidePanel();
-                scheduleTryOnGuidePoll();
+                if(currentOptions().guide_style !== 'none') scheduleTryOnGuidePoll();
             }
         } catch(error) {
             if(isCompatibleModelError(error.message)) {

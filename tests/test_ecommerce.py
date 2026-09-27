@@ -1123,7 +1123,7 @@ class EcommerceBackendTests(unittest.TestCase):
               patch.object(self.main, "enrich_ecommerce_snapshot_with_universal_analysis", new=passthrough),
               patch.object(self.main, "prepare_universal_pose_depth", new=AsyncMock(return_value=([], "Try on", {
                   "pose_canvas": True, "visual_facts": {"status": "skipped"}}))),
-              patch.object(self.main, "prepare_universal_product_anchor", new=AsyncMock(return_value=([], "Try on", {
+              patch.object(self.main, "prepare_try_on_product_edit", new=AsyncMock(return_value=([], "Try on", {
                   "status": "not_required"}))),
               patch.object(self.main, "execute_ai_image_batch", new=AsyncMock(return_value=batch)) as generate,
               patch.object(self.main, "apply_selected_studio_background", new=AsyncMock(return_value=studio_batch)) as studio,
@@ -1132,7 +1132,7 @@ class EcommerceBackendTests(unittest.TestCase):
               patch.object(self.main, "GLOBAL_LOOP", None)):
             asyncio.run(self.main.execute_ecommerce_task("test", snapshot))
         generate.assert_awaited_once()
-        studio.assert_awaited_once()
+        studio.assert_not_awaited()
         save.assert_called_once()
         self.assertEqual(updates["status"], "succeeded", updates.get("error"))
         self.assertEqual(updates["result"]["images"], ["/assets/output/studio.png"])
@@ -1181,14 +1181,11 @@ class EcommerceBackendTests(unittest.TestCase):
                     patch.object(self.main, "media_url_from_path", side_effect=lambda filename: "/output/" + Path(filename).name),
                 ):
                     refs, prompt, audit = await self.main.prepare_universal_pose_depth(snapshot)
-                self.assertEqual(refs[1]["role"], "control_map")
+                self.assertEqual(refs[3 if include_pose else 1]["role"], "control_map")
                 self.assertEqual(audit["source_url"], inputs[2 if include_pose else 0]["url"])
-                self.assertEqual(audit["reference_index"], 2)
-                if include_pose:
-                    self.assertEqual([ref["role"] for ref in refs], ["pose", "control_map", "source", "upper_garment"])
-                    self.assertIn("legs crossed", prompt)
-                    self.assertTrue(audit["pose_canvas"])
-                else:
+                self.assertEqual(audit["reference_index"], 4 if include_pose else 2)
+                self.assertFalse(audit["pose_canvas"])
+                if not include_pose:
                     self.assertIn("Image 2 is a depth map extracted from Image 1", prompt)
                 estimate.assert_awaited_once_with(str(path), {"depth_map_mode": "person"})
         asyncio.run(run_case(False))

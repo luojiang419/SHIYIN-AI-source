@@ -4173,7 +4173,8 @@
             setComparisonForeground(el.afterImage, displayedUrl);
             setComparisonBackdrops(displayedUrl);
             renderResultMeta(task);
-            setGenerationVisible(true, t(task.status === 'queued' ? 'ecommerce.queued' : 'ecommerce.running'));
+            setGenerationVisible(true, state.operation === 'try_on' && task.progress_status
+                ? task.progress_status : t(task.status === 'queued' ? 'ecommerce.queued' : 'ecommerce.running'));
         } else {
             setGenerationVisible(false);
             if(images.length) {

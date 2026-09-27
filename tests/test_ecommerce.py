@@ -299,6 +299,18 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("Use detail references only to refine corresponding garment or product fidelity", prompt)
         self.assertIn("without changing body identity, pose, framing, or unrelated garment regions", prompt)
 
+    def test_try_on_depth_reference_reindexes_garments_and_pose_in_prompt(self):
+        references = [
+            {"role": "source", "url": "/assets/input/body.png"},
+            {"role": "upper_garment", "url": "/assets/input/top.png"},
+            {"role": "pose", "url": "/assets/input/pose.png"},
+            {"role": "control_map", "url": "/output/depth.png"},
+        ]
+        prompt = build_prompt("try_on", references, {})
+        self.assertIn("Image 3 only as the spatial / pose template", prompt)
+        self.assertIn("Image 4 is a depth map extracted from Image 3", prompt)
+        self.assertIn("Image 4 = [DEPTH / POSE GEOMETRY ONLY]", prompt)
+
     def test_try_on_detail_is_bound_to_its_outfit_reference(self):
         references = [
             {"role": "source", "reference_id": "model", "url": "/assets/input/model.png"},
@@ -1053,6 +1065,48 @@ class EcommerceBackendTests(unittest.TestCase):
 
     def make_image(self, path: Path, size=(100, 80), image_format="PNG"):
         Image.new("RGB", size, "white").save(path, image_format)
+
+    def test_try_on_background_depth_is_submitted_next_to_pose_or_source(self):
+        async def run_case(include_pose):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "source.png"
+                self.make_image(path)
+                inputs = [
+                    {"role": "source", "reference_type": "source", "url": "/assets/input/source.png"},
+                    {"role": "upper_garment", "reference_type": "upper_garment", "url": "/assets/input/top.png"},
+                ]
+                if include_pose:
+                    inputs.append({"role": "pose", "reference_type": "pose", "url": "/assets/input/pose.png"})
+                snapshot = {"operation": "try_on", "inputs": inputs, "options": {},
+                            "prompt": build_prompt("try_on", inputs, {})}
+                depth = Path(directory) / "depth.png"
+                self.make_image(depth)
+                with (
+                    patch.object(self.main, "OUTPUT_OUTPUT_DIR", directory),
+                    patch.object(self.main, "output_file_from_url", return_value=str(path)),
+                    patch.object(self.main, "read_app_config", return_value={"depth_map_mode": "person"}),
+                    patch.object(self.main, "render_try_on_depth", new=AsyncMock(return_value=(depth.read_bytes(), "quality"))) as estimate,
+                    patch.object(self.main, "media_url_from_path", side_effect=lambda filename: "/output/" + Path(filename).name),
+                ):
+                    refs, prompt, audit = await self.main.prepare_universal_pose_depth(snapshot)
+                owner_index = 2 if include_pose else 0
+                self.assertEqual(refs[owner_index + 1]["role"], "control_map")
+                self.assertEqual(audit["source_url"], inputs[owner_index]["url"])
+                self.assertEqual(audit["reference_index"], owner_index + 2)
+                self.assertIn(f"Image {owner_index + 2} is a depth map extracted from Image {owner_index + 1}", prompt)
+                estimate.assert_awaited_once_with(str(path), {"depth_map_mode": "person"})
+        asyncio.run(run_case(False))
+        asyncio.run(run_case(True))
+
+    def test_try_on_depth_controls_use_batch_outfit_lut(self):
+        from io import BytesIO
+        source = BytesIO()
+        Image.new("L", (1, 1), 128).save(source, format="PNG")
+        controls = {"farPoint": 0, "nearPoint": 100, "midtone": 0,
+                    "contrast": 100, "brightness": 20, "smooth": 0, "invert": False}
+        result = self.main.adjust_try_on_depth(source.getvalue(), controls)
+        with Image.open(BytesIO(result)) as image:
+            self.assertEqual(image.getpixel((0, 0)), 179)
 
     def test_provider_list_keeps_user_added_platform_ids_and_default_presets(self):
         class FakeDatabase:

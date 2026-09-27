@@ -18635,6 +18635,8 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         reference_count = len(universal_style_references(inputs, options["generation_style"], bool(options.get("instruction"))))
         if options["generation_style"] == "standard_product" and pose_reference:
             reference_count += 1
+    if operation == "try_on" and not any(item.get("reference_type") == "control_map" for item in inputs):
+        reference_count += 1  # 最终换衣图在后台增加一张动作深度控制图。
     candidates = [route for route in candidates if int(route.get("max_reference_images") or 0) >= reference_count]
     if not candidates:
         if operation == "universal":
@@ -20666,6 +20668,64 @@ async def render_universal_person_depth(path: str) -> Tuple[bytes, str]:
     return output.getvalue(), selection.tier
 
 
+def adjust_try_on_depth(content: bytes, controls: Dict[str, Any]) -> bytes:
+    """与批量换款相同的灰度 LUT；默认参数保持模型原始 PNG。"""
+    defaults = {"farPoint": 0, "nearPoint": 100, "midtone": 0, "contrast": 100,
+                "brightness": 0, "smooth": 0, "invert": False}
+    if all(controls.get(key, value) == value for key, value in defaults.items()):
+        return content
+    far = float(controls.get("farPoint", 0)) / 100
+    near = float(controls.get("nearPoint", 100)) / 100
+    gamma = 2 ** (-float(controls.get("midtone", 0)) / 50)
+    lut = []
+    for index in range(256):
+        value = max(0.0, min(1.0, (index / 255 - far) / max(.05, near - far))) ** gamma
+        value = max(0.0, min(1.0, (value - .5) * float(controls.get("contrast", 100)) / 100
+                                   + .5 + float(controls.get("brightness", 0)) / 100))
+        if controls.get("invert"):
+            value = 1 - value
+        lut.append(round(value * 255))
+    with Image.open(BytesIO(content)) as source:
+        adjusted = source.convert("L").point(lut)
+    smooth = float(controls.get("smooth", 0))
+    if smooth > 0:
+        # Canvas 批量换款按图宽换算 blur 半径；这里保留同一尺度。
+        adjusted = adjusted.filter(ImageFilter.GaussianBlur(max(.2, smooth * adjusted.width / 1000)))
+    output = BytesIO()
+    adjusted.save(output, format="PNG")
+    return output.getvalue()
+
+
+async def render_try_on_depth(path: str, settings: Dict[str, Any]) -> Tuple[bytes, str]:
+    mode = settings.get("depth_map_mode")
+    selection = sync_depth_model_preference(settings)
+    manager = DEPTH_MODEL_MANAGER if mode == "professional" or not selection.quality else PERSON_DEPTH_COMPONENT_MANAGER
+    if not manager.public_status().get("ready"):
+        manager.start_background()
+        deadline = time.monotonic() + 3600
+        while time.monotonic() < deadline:
+            status = manager.public_status()
+            if status.get("ready"):
+                break
+            if status.get("state") in {"failed", "error", "unavailable"}:
+                raise ValueError(str(status.get("message") or "深度模型准备失败"))
+            await asyncio.sleep(1.5)
+        else:
+            raise ValueError("深度模型准备超时，请在设置中检查组件状态")
+    if mode == "professional":
+        content = Path(path).read_bytes()
+        image = prepare_dwpose_input(content, decode_max_pixels=DWPOSE_INPUT_MAX_PIXELS,
+                                     inference_max_pixels=DWPOSE_INFERENCE_MAX_PIXELS,
+                                     inference_max_edge=DWPOSE_INFERENCE_MAX_EDGE)
+        depth = await asyncio.to_thread(render_depth_image, image)
+        output = BytesIO()
+        Image.fromarray(depth.image_gray, mode="L").save(output, format="PNG")
+        depth_bytes, tier = output.getvalue(), "professional"
+    else:
+        depth_bytes, tier = await render_universal_person_depth(path)
+    return adjust_try_on_depth(depth_bytes, settings.get("depth_map_controls") or {}), tier
+
+
 async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     """复用批量复刻的人物深度推理；实际顺序与提示词同步编译并保留审计。"""
     options = snapshot.get("options") or {}
@@ -20673,6 +20733,32 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
     if snapshot.get("operation") == "universal" and options.get("generation_style") in {"standard_product", "lookbook"} and options.get("prompt_policy") not in {"free", "lookbook"}:
         refs = universal_style_references(refs, options["generation_style"], bool(options.get("instruction")))
     prompt = snapshot["prompt"]
+    if snapshot.get("operation") == "try_on":
+        if any(item.get("reference_type") == "control_map" for item in refs):
+            return refs, prompt, {"status": "provided"}
+        if len(refs) >= ONLINE_IMAGE_REFERENCE_MAX:
+            raise ValueError("自由换衣需要为动作深度图预留一个参考图位置，请减少一张素材")
+        owner = next((item for item in refs if item.get("reference_type") == "pose"), None)
+        owner = owner or next((item for item in refs if item.get("reference_type") == "source"), None)
+        if not owner:
+            raise ValueError("自由换衣缺少可提取深度的姿势图或人物图")
+        path = output_file_from_url(owner.get("url") or "")
+        if not path or not os.path.isfile(path):
+            raise ValueError("动作来源图片不可读取，无法提取深度图")
+        settings = read_app_config(APP_PATHS.data_root)
+        depth_bytes, tier = await render_try_on_depth(path, settings)
+        destination = Path(OUTPUT_OUTPUT_DIR) / f"try_on_depth_{uuid.uuid4().hex}.png"
+        destination.write_bytes(depth_bytes)
+        url = media_url_from_path(str(destination))
+        depth_ref = {"url": url, "role": "control_map", "reference_type": "control_map",
+                     "label": "动作人物深度图", "reference_id": "try_on_derived_depth"}
+        owner_index = refs.index(owner)
+        refs.insert(owner_index + 1, depth_ref)
+        depth_index = owner_index + 2
+        prompt = build_ecommerce_prompt("try_on", refs, options)
+        return refs, prompt, {"status": "succeeded", "url": url, "source_url": owner["url"],
+                              "reference_index": depth_index, "tier": tier,
+                              "mode": settings.get("depth_map_mode") or "person"}
     if snapshot.get("operation") != "universal" or options.get("generation_style") != "standard_product" or options.get("prompt_policy") in {"free", "lookbook"}:
         return refs, prompt, {"status": "not_required"}
     pose = next((item for item in refs if item.get("reference_type") == "pose"), None)
@@ -20832,6 +20918,8 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     routes = list(snapshot.get("route_candidates") or [])
     failures = []
     try:
+        if snapshot["operation"] == "try_on":
+            update_ecommerce_task(task_id, {"progress_status": "正在提取动作深度图…"})
         prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
         if snapshot["operation"] == "pose_transfer":
             prepared_refs = [
@@ -20841,7 +20929,9 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 for ref in prepared_refs
             ]
         snapshot["pose_depth"] = pose_depth
-        update_ecommerce_task(task_id, {"pose_depth": pose_depth, "generation_prompt": prepared_prompt, "generation_references": prepared_refs})
+        update_ecommerce_task(task_id, {"pose_depth": pose_depth, "generation_prompt": prepared_prompt,
+                                       "generation_references": prepared_refs,
+                                       "progress_status": "正在生成最终换衣图…" if snapshot["operation"] == "try_on" else ""})
         for index, route in enumerate(routes):
             try:
                 generation_refs, generation_prompt, pose_anchor = await prepare_universal_product_anchor(snapshot, route, prepared_refs, prepared_prompt)

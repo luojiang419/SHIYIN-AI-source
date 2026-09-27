@@ -129,7 +129,7 @@ POSE_TRANSFER_VIEW_ROLES = ("source_view_1", "source_view_2")
 POSE_TRANSFER_DETAIL_ROLE = "fabric_detail"
 ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", POSE_TRANSFER_DETAIL_ROLE, *POSE_TRANSFER_VIEW_ROLES, *UNIVERSAL_REFERENCE_ROLE_IDS}
 TRY_ON_OUTFIT_ROLES = {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}
-TRY_ON_REFERENCE_ROLES = {"source", "model_identity", *TRY_ON_OUTFIT_ROLES, "detail", "pose"}
+TRY_ON_REFERENCE_ROLES = {"source", "model_identity", *TRY_ON_OUTFIT_ROLES, "detail", "pose", "control_map"}
 UNIVERSAL_INTERACTIONS = {"wear", "put_on", "hold", "carry", "place", "use", "pose", "scene", "style", "identity"}
 
 POSE_PRESETS = [
@@ -1094,6 +1094,7 @@ def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
         "accessory": "ACCESSORY SOURCE",
         "detail": "LOCAL PRODUCT DETAIL SOURCE",
         "pose": "POSE / SPATIAL TEMPLATE ONLY",
+        "control_map": "DEPTH / POSE GEOMETRY ONLY",
         "prop": "PROP OR PRODUCT SOURCE",
         "scene_prop": "SCENE PROP SOURCE",
         "background": "BACKGROUND SOURCE ONLY",
@@ -1801,6 +1802,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         }
         outfit_refs = [item for item in normalized if item["role"] in TRY_ON_OUTFIT_ROLES]
         pose_index = next((index + 1 for index, item in enumerate(normalized) if item["role"] == "pose"), 0)
+        depth_index = next((index + 1 for index, item in enumerate(normalized) if item["role"] == "control_map"), 0)
         identity_index = next((index + 1 for index, item in enumerate(normalized) if item["role"] == "model_identity"), 0)
         legacy_category = {"upper": "upper-body garment", "lower": "lower-body garment", "dress": "dress or one-piece", "auto": "garment"}.get(str(options.get("garment_category") or "auto"), "garment")
         outfit_lines = []
@@ -1850,6 +1852,14 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             if studio_background_selected
             else " Preserve the source person's pose, hands, framing, lighting, and background."
         )
+        if depth_index:
+            owner_index = pose_index or next((index + 1 for index, item in enumerate(normalized) if item["role"] == "source"), 1)
+            pose_instruction += (
+                f" POSE DEPTH CONTROL: Image {depth_index} is a depth map extracted from Image {owner_index}. "
+                "Read both as one registered action reference. Match joints, head and body direction, "
+                "limb overlaps, balance, camera, crop, person scale and placement. The depth map "
+                "supplies geometry only; never render its grayscale or copy clothing or identity from it."
+            )
         task = (
             "Create a marketplace-ready virtual try-on outfit on the person in the source image with SKU-level garment fidelity. "
             f"Use these outfit references in their natural dress-up layer order: {outfit_map or legacy_category}. "

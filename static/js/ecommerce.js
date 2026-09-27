@@ -596,6 +596,7 @@
         el.ecommercePage?.classList.toggle('is-universal', universal);
         el.ecommercePage?.classList.toggle('is-try-on', tryOn);
         el.ecommercePage?.classList.toggle('is-batch-outfit', batchOutfit);
+        el.ecommercePage?.classList.toggle('is-pose-transfer', state.operation === 'pose_transfer');
         el.batchOutfitControl?.classList.toggle('hidden', !batchOutfit);
         el.batchOutfitWorks?.classList.toggle('hidden', !batchOutfit);
         if(!universal) el.ecommercePage?.classList.remove('has-many-universal-references');

@@ -1921,6 +1921,113 @@
         requestAnimationFrame(applyTryOnPreviewCutouts);
     }
 
+    function openTryOnResultViewer(url, title, opener){
+        if(!url) return;
+        byId('tryOnResultViewer')?.close();
+        const dialog = document.createElement('dialog');
+        dialog.id = 'tryOnResultViewer';
+        dialog.className = 'ec-tryon-result-viewer';
+        dialog.setAttribute('aria-label', `${title}全屏浏览`);
+        dialog.innerHTML = `<div class="ec-tryon-viewer-shell">
+            <header class="ec-tryon-viewer-head"><div><small>FULLSCREEN VIEW</small><strong>${escapeHtml(title)}</strong></div><nav aria-label="图片缩放">
+                <button type="button" data-viewer-zoom-out aria-label="缩小">−</button>
+                <button type="button" data-viewer-reset aria-label="恢复适合窗口大小">1×</button>
+                <button type="button" data-viewer-zoom-in aria-label="放大">+</button>
+                <button type="button" data-viewer-close aria-label="关闭全屏浏览">×</button>
+            </nav></header>
+            <div class="ec-tryon-viewer-stage" data-viewer-stage tabindex="0"><img src="${escapeHtml(url)}" alt="${escapeHtml(title)}" draggable="false"></div>
+            <p class="ec-tryon-viewer-hint">滚轮缩放 · 放大后拖动平移 · 双击复位 · Esc 退出</p>
+        </div>`;
+        document.body.appendChild(dialog);
+        const stage = dialog.querySelector('[data-viewer-stage]');
+        const image = stage.querySelector('img');
+        const zoomOut = dialog.querySelector('[data-viewer-zoom-out]');
+        const zoomIn = dialog.querySelector('[data-viewer-zoom-in]');
+        const reset = dialog.querySelector('[data-viewer-reset]');
+        const view = {scale:1, panX:0, panY:0, pointer:null, width:0, height:0};
+        function clampPan(){
+            const maxX = Math.max(0, (view.width * view.scale - stage.clientWidth) / 2);
+            const maxY = Math.max(0, (view.height * view.scale - stage.clientHeight) / 2);
+            view.panX = Math.max(-maxX, Math.min(maxX, view.panX));
+            view.panY = Math.max(-maxY, Math.min(maxY, view.panY));
+        }
+        function applyView(){
+            if(image.naturalWidth && image.naturalHeight && stage.clientWidth && stage.clientHeight){
+                const fit = Math.min(stage.clientWidth / image.naturalWidth, stage.clientHeight / image.naturalHeight);
+                view.width = image.naturalWidth * fit;
+                view.height = image.naturalHeight * fit;
+                image.style.width = `${view.width}px`;
+                image.style.height = `${view.height}px`;
+            }
+            clampPan();
+            image.style.transform = `translate(${view.panX}px, ${view.panY}px) scale(${view.scale})`;
+            stage.dataset.scale = String(view.scale);
+            stage.classList.toggle('is-zoomed', view.scale > 1);
+            reset.textContent = `${view.scale.toFixed(view.scale % 1 ? 2 : 0).replace(/0$/,'')}×`;
+            zoomOut.disabled = view.scale <= 1;
+            zoomIn.disabled = view.scale >= 8;
+        }
+        function setZoom(value, event){
+            const next = Math.round(Math.max(1, Math.min(8, Number(value) || 1)) * 100) / 100;
+            if(event && view.scale > 0){
+                const rect = stage.getBoundingClientRect();
+                const cursorX = event.clientX - rect.left - rect.width / 2;
+                const cursorY = event.clientY - rect.top - rect.height / 2;
+                view.panX = cursorX - (cursorX - view.panX) * next / view.scale;
+                view.panY = cursorY - (cursorY - view.panY) * next / view.scale;
+            }
+            view.scale = next;
+            if(next === 1) { view.panX = 0; view.panY = 0; }
+            applyView();
+        }
+        zoomOut.addEventListener('click', () => setZoom(view.scale - .25));
+        zoomIn.addEventListener('click', () => setZoom(view.scale + .25));
+        reset.addEventListener('click', () => setZoom(1));
+        dialog.querySelector('[data-viewer-close]').addEventListener('click', () => dialog.close());
+        stage.addEventListener('wheel', event => { event.preventDefault(); setZoom(view.scale * (event.deltaY < 0 ? 1.15 : 1 / 1.15), event); }, {passive:false});
+        stage.addEventListener('dblclick', event => { event.preventDefault(); setZoom(view.scale > 1 ? 1 : 2, event); });
+        stage.addEventListener('pointerdown', event => {
+            if(view.scale <= 1 || event.button !== 0) return;
+            view.pointer = {id:event.pointerId, x:event.clientX, y:event.clientY, panX:view.panX, panY:view.panY};
+            stage.setPointerCapture(event.pointerId);
+            stage.classList.add('is-dragging');
+            event.preventDefault();
+        });
+        stage.addEventListener('pointermove', event => {
+            if(view.pointer?.id !== event.pointerId) return;
+            view.panX = view.pointer.panX + event.clientX - view.pointer.x;
+            view.panY = view.pointer.panY + event.clientY - view.pointer.y;
+            applyView();
+        });
+        const finishDrag = event => {
+            if(view.pointer?.id !== event.pointerId) return;
+            view.pointer = null;
+            stage.classList.remove('is-dragging');
+            if(stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+        };
+        stage.addEventListener('pointerup', finishDrag);
+        stage.addEventListener('pointercancel', finishDrag);
+        dialog.addEventListener('keydown', event => {
+            if(event.key === 'Escape') { event.preventDefault(); dialog.close(); }
+            else if(['+','='].includes(event.key)) { event.preventDefault(); setZoom(view.scale + .25); }
+            else if(event.key === '-') { event.preventDefault(); setZoom(view.scale - .25); }
+            else if(event.key === '0') { event.preventDefault(); setZoom(1); }
+            else if(view.scale > 1 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) {
+                event.preventDefault();
+                view.panX += event.key === 'ArrowLeft' ? 80 : event.key === 'ArrowRight' ? -80 : 0;
+                view.panY += event.key === 'ArrowUp' ? 80 : event.key === 'ArrowDown' ? -80 : 0;
+                applyView();
+            }
+        });
+        const observer = new ResizeObserver(applyView);
+        observer.observe(stage);
+        image.addEventListener('load', applyView, {once:true});
+        dialog.addEventListener('close', () => { observer.disconnect(); dialog.remove(); opener?.focus({preventScroll:true}); }, {once:true});
+        dialog.showModal();
+        applyView();
+        stage.focus({preventScroll:true});
+    }
+
     function syncTryOnGuidePanel(){
         const resultPanel = el.emptyResult?.closest('.ec-result-panel');
         if(!resultPanel) return;
@@ -1980,12 +2087,13 @@
             finalPanel.className = 'ec-tryon-final-panel';
             resultBody.appendChild(finalPanel);
         }
-        finalPanel.innerHTML = tryOnImage ? `<div class="ec-tryon-final-head"><div><small>FINAL LOOK</small><h3>最终换衣图</h3></div><div><button type="button" data-compare-tryon>与原图对比</button><button type="button" data-download-tryon>下载图片</button></div></div><div class="ec-tryon-final-art"><img src="${escapeHtml(tryOnImage)}" alt="AI 生成的最终换衣图"></div>` : '';
+        finalPanel.innerHTML = tryOnImage ? `<div class="ec-tryon-final-head"><div><small>FINAL LOOK</small><h3>最终换衣图</h3></div><div><button type="button" data-compare-tryon>与原图对比</button><button type="button" data-download-tryon>下载图片</button></div></div><div class="ec-tryon-final-art"><button type="button" class="ec-tryon-art-button" data-open-tryon-fullscreen aria-label="全屏查看最终换衣图"><img src="${escapeHtml(tryOnImage)}" alt="AI 生成的最终换衣图"><span>⤢ 全屏查看</span></button></div>` : '';
         finalPanel.querySelector('[data-compare-tryon]')?.addEventListener('click', () => {
             guide.compare = true;
             syncTryOnGuidePanel();
         });
         finalPanel.querySelector('[data-download-tryon]')?.addEventListener('click', downloadSelectedPreview);
+        finalPanel.querySelector('[data-open-tryon-fullscreen]')?.addEventListener('click', event => openTryOnResultViewer(tryOnImage, '最终换衣图', event.currentTarget));
         if(!showingGuide && !showingFinal && tryOnImage) {
             if(!backButton) {
                 backButton = document.createElement('button');
@@ -2010,18 +2118,48 @@
                 ['tryon','最终换衣图',tryOnImage,tryOnTask?.status === 'failed' ? '生成失败' : (tryOnTask?.status === 'succeeded' ? '已完成' : '生成中')],
             ];
             gallery.innerHTML = works.map(([view,label,url,emptyText]) => `<button type="button" data-tryon-result-view="${view}" aria-pressed="${view === (showingGuide ? 'guide' : 'tryon')}" ${view === 'guide' && !url ? 'disabled' : ''}><span class="ec-tryon-gallery-thumb">${url ? `<img src="${escapeHtml(url)}" alt="">` : ''}</span><span class="ec-tryon-gallery-copy"><strong>${label}</strong><small>${url ? '点击查看大图' : escapeHtml(emptyText)}</small></span></button>`).join('');
-            gallery.querySelectorAll('[data-tryon-result-view]').forEach(button => button.addEventListener('click', () => {
-                if(button.dataset.tryonResultView === 'guide' && !image) return;
-                guide.view = button.dataset.tryonResultView;
-                guide.compare = false;
-                syncTryOnGuidePanel();
-                gallery.querySelector(`[data-tryon-result-view="${guide.view}"]`)?.focus({preventScroll:true});
-            }));
+            gallery.querySelectorAll('[data-tryon-result-view]').forEach(button => {
+                button.addEventListener('click', () => {
+                    if(button.dataset.tryonResultView === 'guide' && !image) return;
+                    guide.view = button.dataset.tryonResultView;
+                    guide.compare = false;
+                    syncTryOnGuidePanel();
+                    gallery.querySelector(`[data-tryon-result-view="${guide.view}"]`)?.focus({preventScroll:true});
+                });
+                button.addEventListener('dblclick', () => {
+                    const selected = button.dataset.tryonResultView === 'guide';
+                    openTryOnResultViewer(selected ? image : tryOnImage, selected ? '模特搭配卡' : '最终换衣图', button);
+                });
+            });
         }
-        panel.innerHTML = image ? `<div class="ec-tryon-guide-head"><div><small>OUTFIT CARD</small><h3>模特搭配卡</h3></div><label>导出格式 <select data-tryon-guide-format><option value="png">PNG</option><option value="jpeg">JPG</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div><div class="ec-tryon-guide-result"><img src="${escapeHtml(image)}" alt="AI 生成的模特搭配卡"></div>`
+        panel.innerHTML = image ? `<div class="ec-tryon-guide-head"><div><small>OUTFIT CARD</small><h3>模特搭配卡</h3></div><label>导出格式 <select data-tryon-guide-format><option value="png">PNG</option><option value="jpeg">JPG</option></select></label><button type="button" data-export-tryon-guide>导出图片</button></div><div class="ec-tryon-guide-result"><button type="button" class="ec-tryon-art-button" data-open-guide-fullscreen aria-label="全屏查看模特搭配卡"><img src="${escapeHtml(image)}" alt="AI 生成的模特搭配卡"><span>⤢ 全屏查看</span></button></div>`
             : `<p class="ec-tryon-guide-state" role="status">${escapeHtml(guideError || (waitingForTryOn ? '换衣图完成后生成模特搭配卡…' : (running ? '正在生成模特搭配卡…' : '等待开始生成。')))}</p>`;
         panel.querySelector('[data-export-tryon-guide]')?.addEventListener('click', exportTryOnGuide);
+        panel.querySelector('[data-open-guide-fullscreen]')?.addEventListener('click', event => openTryOnResultViewer(image, '模特搭配卡', event.currentTarget));
         if(guideOwnedByCurrentTask && !task && (currentOptions().guide_task_id || guideOwnerId) && !guide.loading && !guide.submitting && !guide.timer && !guide.error) scheduleTryOnGuidePoll();
+    }
+
+    function buildTryOnGuidePrompt(style, references, requirement){
+        const indexed = references.map((item,index) => ({item,index:index + 1}));
+        const products = indexed.filter(({item}) => ['upper_garment','lower_garment','full_garment','garment','shoes','accessory','prop'].includes(item.role));
+        const garments = products.filter(({item}) => ['upper_garment','lower_garment','full_garment','garment'].includes(item.role));
+        const accessories = products.filter(({item}) => ['shoes','accessory','prop'].includes(item.role));
+        const details = indexed.filter(({item}) => item.role === 'detail');
+        const layout = indexed.find(({item}) => item.role === 'style');
+        const subject = indexed.find(({item}) => item.role === 'subject');
+        const inventory = products.map(({item,index},number) => `${String(number + 1).padStart(2,'0')} = Image ${index}, ${item.role}, ${String(item.label || item.name || 'supplied item').slice(0,80)}`).join('; ');
+        const direction = style === 'editorial_silhouette'
+            ? 'STYLE A — FASHION SILHOUETTE: Build a believable headless, faceless dressed silhouette from the supplied garments, preserving the completed outfit proportions. No visible person, skin, mannequin head or invented garment.'
+            : 'STYLE B — REAL MODEL EDITORIAL: Place the exact recognizable person from the finished try-on image in the hero area, full length with face and both shoes visible. Keep her pose, hair, skin and every worn garment the same; do not restyle the hero.';
+        return [
+            'Create ONE finished 4:5 luxury fashion editorial outfit card, suitable for a premium print lookbook. It must read as an art-directed magazine page, not a utilitarian product grid or UI screenshot.',
+            `REFERENCE CONTRACT: Image ${subject?.index || 1} is the completed try-on and the only authority for the central finished look. Product inventory, each shown exactly once as its own isolated cutout: ${inventory || 'use only supplied garments'}. ${details.length ? `Material detail ${details.map(({index}) => `Image ${index}`).join(', ')} is for a small fabric swatch and the assigned garment texture only, never an extra clothing item.` : ''}`,
+            layout ? `Image ${layout.index} is a LAYOUT-ONLY reference. Borrow its sophisticated editorial rhythm, margin proportions, type hierarchy, floating product scale and paper palette. Do not borrow its depicted person, garments, accessories, logos or wording.` : 'Use the described editorial layout when no layout reference can be sent.',
+            `ART DIRECTION: ${direction} Follow the editorial reference as a magazine page on one continuous warm-ivory cotton-paper ground: upper-left masthead, a 28% LEFT column, a roughly 42% full-height center figure, and a 24% RIGHT column. No rectangular gray photo panel or hard catalog boxes behind the person. LEFT column: exactly ${garments.length} supplied garment cutouts, stacked vertically beneath the masthead; no shoes here. RIGHT column: exactly ${accessories.length} supplied shoe/accessory cutouts beneath a small “THE LOOK” heading; show each once and at a generous scale. ${accessories.length === 1 ? 'If the only right-side product is a pair of shoes, show ONE pair in ONE position, not two pairs.' : ''} ${details.length ? `Below those right-side products, place exactly ONE small unnumbered material close-up copied from detail Image ${details[0].index}; preserve that image's actual color and weave. Never turn the style-reference image's beige fabric into this swatch.` : 'Leave the lower-right space calm and open; do not invent a swatch.'} Give the figure a soft grounded shadow and let product cutouts float with restrained contact shadows. Keep all heads, feet and items fully visible. Empty space is intentional luxury design; do not fill it with repeated items.`,
+            'TYPOGRAPHY AND FINISHING: confine a two-line high-contrast serif masthead “THE MODERN EDIT” to the upper-left. A small tracked “LOOK 01” sits at upper right. Beside each product, show only its matching two-digit number and a short noun such as BLAZER, PANTS or LOAFERS; NO descriptive sentence, guessed material name, prices, logo, brand or pseudo-text. Add delicate hairline rules, one graceful handwritten styling accent near the lower-left margin, and four quiet color dots sampled from the finished outfit below the single detail swatch. Keep letters sharp and modest; if uncertain, omit them. Never add unrelated scenery or product tiles.',
+            `FIDELITY CHECK: isolate products from source backgrounds without carrying over source people. Preserve silhouette, color, seams, buttons, hardware, fabric weave and shoe shape. Final object census: ONE finished hero; exactly ${garments.length} garments on the LEFT; exactly ${accessories.length} accessories on the RIGHT; ${details.length ? 'ONE detail swatch based only on its own source image' : 'ZERO swatches'}; no other product photos. A pair of shoes counts as ONE cutout. Never duplicate a shoe or garment, never invent a bag or jewelry. ${style === 'editorial_silhouette' ? 'The central styling silhouette has no face, skin or human body.' : 'Never change the face or finished outfit from the subject image.'} The style reference guides layout only, never product contents.`,
+            requirement ? `ADDITIONAL USER DIRECTION (apply only where compatible with ${style === 'editorial_silhouette' ? 'the faceless garment silhouette' : 'the finished model look'}): ${requirement}` : '',
+        ].filter(Boolean).join('\n\n');
     }
 
     async function generateTryOnGuide(style, sourceTask){
@@ -2040,16 +2178,25 @@
             role:item.role === 'source' ? 'subject' : item.role,
             reference_type:item.role === 'source' ? 'subject' : item.role,
         }));
-        const referenceMap = references.map((item,index) => `Image ${index + 1}: ${item.role} (${item.label || item.name || 'reference'})`).join('; ');
-        const requirement = String(sourceTask?.options?.instruction || sourceTask?.request?.options?.instruction || '').trim();
-        const direction = style === 'editorial_silhouette'
-            ? 'STYLE A — FASHION SILHOUETTE: In the large center column, arrange the supplied garments into an elegant full-body dressed human silhouette with no visible real person, face, skin, or mannequin head. The subject reference informs only fit and proportions. Show each supplied clothing piece separately in a narrow numbered left column; show the supplied bag, shoes, jewelry and other accessories as isolated objects in a narrow right column.'
-            : 'STYLE B — REAL MODEL EDITORIAL: In the large center column, show the selected reference model as the same recognizable full-length person wearing the supplied outfit, preserving face, body and hair. Show each supplied clothing piece separately in a narrow numbered left column; show the supplied bag, shoes, jewelry and other accessories as isolated objects in a narrow right column.';
-        const prompt = `Create ONE finished vertical luxury fashion editorial outfit board, visually following the selected reference layout. Reference order: ${referenceMap}. ${direction} The subject image is the completed try-on result and must anchor the center figure's exact face, pose and finished outfit. Use an ivory and warm beige studio background, refined dark-brown serif headline at upper left, small editorial section heading at upper right, elegant fine dividers, restrained numbered item captions, generous negative space, and a small palette / material strip at the bottom. The center figure is dominant; the left and right item columns are clearly separated and never overlap it. Show each supplied product only once in its item column; never duplicate shoes or numbering. Keep all readable words short and relevant to the supplied items; do not invent brand names or specific products. Preserve every referenced garment's shape, color, fabric and details. Pose and fabric references guide only their assigned purpose. Do not add unreferenced clothes or accessories. Produce a single complete poster, not a UI screenshot, collage of unrelated photos, or before/after comparison. ${requirement ? `Additional user requirement: ${requirement}` : ''}`;
         try {
             const sourceParameters = sourceTask?.parameters || sourceTask?.request?.parameters || {};
             const resolution = sourceParameters.resolution || state.resolution;
-            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:sourceTask?.result?.provider_id || sourceTask?.provider_id || state.providerId, model:sourceTask?.result?.model || sourceTask?.model || state.model, aspect_ratio:'4:5', resolution:resolution === 'auto' ? '2k' : resolution, quality:sourceParameters.quality || state.quality, count:1, parent_task_id:''};
+            const providerId = sourceTask?.result?.provider_id || sourceTask?.provider_id || state.providerId;
+            const model = sourceTask?.result?.model || sourceTask?.model || state.model;
+            const modelCapability = (state.capabilities?.models || []).find(item => item.provider_id === providerId && item.model === model);
+            const referenceLimit = Math.min(Number(state.capabilities?.universal_reference_limit || 14), Number(modelCapability?.max_reference_images || 14));
+            if(references.length < referenceLimit){
+                const styleFile = style === 'editorial_silhouette' ? 'tryon-style-silhouette-reference.png' : 'tryon-style-model-reference.png';
+                try {
+                    const response = await fetch(`/static/images/${styleFile}`, {cache:'force-cache'});
+                    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const uploaded = await uploadReferenceFile(new File([await response.blob()], styleFile, {type:'image/png'}));
+                    references.push({url:uploaded.url, name:styleFile, role:'style', reference_type:'style', reference_id:'tryon_guide_layout', label:'版式样式参考', instruction:'仅参考排版、留白、字号层级和纸张色调；不得复制图中的人物、商品、品牌或文字', kind:'image', mime:'image/png'});
+                } catch(error) { console.warn('搭配卡样式参考上传失败，按提示词版式继续生成', error); }
+            }
+            const requirement = String(sourceTask?.options?.instruction || sourceTask?.request?.options?.instruction || '').trim();
+            const prompt = buildTryOnGuidePrompt(style, references, requirement);
+            const payload = {operation:'universal', mode:'standard', inputs:references, options:{prompt_policy:'free', instruction:prompt}, provider_id:providerId, model, aspect_ratio:'4:5', resolution:resolution === 'auto' ? '2k' : resolution, quality:sourceParameters.quality || state.quality, count:1, parent_task_id:''};
             const task = await fetchJson('/api/ecommerce/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
             if(state.options.try_on?.guide_source_task_id !== ownerTaskId) return;
             guide.task = task;

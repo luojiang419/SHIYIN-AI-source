@@ -1104,24 +1104,39 @@ class EcommerceBackendTests(unittest.TestCase):
             result = asyncio.run(self.main.apply_selected_studio_background(batch, snapshot, {"provider_id": "test", "model": "test"}))
         self.assertEqual(result["images"], ["/assets/output/studio.png"])
 
-    def test_try_on_visual_gate_rejects_missing_product(self):
-        snapshot = {"inputs": [
-            {"reference_type": "pose", "url": "/pose"},
-            {"reference_type": "source", "url": "/person"},
-            {"reference_type": "upper_garment", "url": "/jacket"},
-            {"reference_type": "lower_garment", "url": "/shorts"},
-        ]}
-        route = {"provider_id": "vision", "model": "test"}
-        async def fake_llm(request):
-            self.assertEqual(request.images, ["/candidate", "/pose", "/person", "/jacket", "/shorts"])
-            return {"text": '{"pose_match":true,"identity_match":true,"product_matches":[false,true],"watermark_free":true,'
-                            '"all_passed":false,"issues":["jacket missing"]}'}
-        with (patch.object(self.main, "configured_ecommerce_vision_route", return_value=route),
-              patch.object(self.main, "canvas_llm", new=AsyncMock(side_effect=fake_llm))):
-            checked = asyncio.run(self.main.inspect_try_on_candidate(snapshot, "/candidate"))
-        self.assertFalse(checked["passed"])
-        self.assertEqual(checked["product_matches"], [False, True])
-        self.assertEqual(checked["issues"], ["jacket missing"])
+    def test_try_on_delivers_first_result_without_visual_review(self):
+        route = {"provider_id": "test", "provider_name": "Test", "model": "test"}
+        snapshot = {"operation": "try_on", "mode": "standard", "options": {"studio_reference": "studio_warm"},
+                    "inputs": [], "prompt": "Try on", "route_candidates": [route], "size": "1024x1024",
+                    "quality": "high", "count": 1, "aspect_ratio": "2:3", "resolution": "2k", "parameters": {}}
+        batch = {"provider": {"id": "test", "name": "Test"}, "model": "test",
+                 "images": ["/assets/output/dressed.png"], "image_items": [], "raw": {},
+                 "generation_started_at": 1, "generation_completed_at": 2, "generation_elapsed_seconds": 1}
+        studio_batch = {**batch, "images": ["/assets/output/studio.png"]}
+        updates = {}
+
+        async def passthrough(current):
+            return current, None
+
+        with (patch.object(self.main, "update_ecommerce_task", side_effect=lambda _id, update: updates.update(update)),
+              patch.object(self.main, "enrich_ecommerce_snapshot_with_garment_analysis", new=passthrough),
+              patch.object(self.main, "enrich_ecommerce_snapshot_with_universal_analysis", new=passthrough),
+              patch.object(self.main, "prepare_universal_pose_depth", new=AsyncMock(return_value=([], "Try on", {
+                  "pose_canvas": True, "visual_facts": {"status": "skipped"}}))),
+              patch.object(self.main, "prepare_universal_product_anchor", new=AsyncMock(return_value=([], "Try on", {
+                  "status": "not_required"}))),
+              patch.object(self.main, "execute_ai_image_batch", new=AsyncMock(return_value=batch)) as generate,
+              patch.object(self.main, "apply_selected_studio_background", new=AsyncMock(return_value=studio_batch)) as studio,
+              patch.object(self.main, "apply_fabric_enhancement", new=AsyncMock(return_value=studio_batch)),
+              patch.object(self.main, "save_to_history") as save,
+              patch.object(self.main, "GLOBAL_LOOP", None)):
+            asyncio.run(self.main.execute_ecommerce_task("test", snapshot))
+        generate.assert_awaited_once()
+        studio.assert_awaited_once()
+        save.assert_called_once()
+        self.assertEqual(updates["status"], "succeeded", updates.get("error"))
+        self.assertEqual(updates["result"]["images"], ["/assets/output/studio.png"])
+        self.assertNotIn("try_on_quality", updates["result"])
 
     def test_try_on_studio_refinement_keeps_pose_and_depth_references(self):
         async def fake_batch(**kwargs):

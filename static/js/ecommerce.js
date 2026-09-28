@@ -144,6 +144,7 @@
         taskPollInflight:false,
         routeActive:window.top === window,
         submissionsInFlight:0,
+        uploadsInFlight:0,
         generationTimer:null,
         candidateTimer:null,
         candidateVisibleCount:ECOMMERCE_CANDIDATE_INITIAL_LIMIT,
@@ -570,6 +571,20 @@
     function currentConfig(){ return OPERATION_CONFIG[state.operation]; }
     function currentOptions(){ return state.options[state.operation]; }
 
+    function syncGenerateButtonState(){
+        if(!el.generateButton) return;
+        const pose = state.operation === 'pose_transfer' && currentOptions().pose_source === 'reference' ? state.inputs.pose : null;
+        const depth = state.workspaces.pose_transfer?.poseDepth;
+        const waitingForDepth = Boolean(pose?.url && (depth?.source_url !== pose.url || depth?.status !== 'ready' || !depth?.url));
+        const depthFailed = waitingForDepth && depth?.source_url === pose.url && depth?.status === 'failed';
+        const label = el.generateButton.querySelector('span');
+        if(label) label.textContent = state.uploadsInFlight ? t('ecommerce.uploading')
+            : depthFailed ? t('ecommerce.poseDepthFailed')
+            : waitingForDepth ? t('ecommerce.poseDepthPreparing')
+            : t('ecommerce.generate');
+        el.generateButton.disabled = state.initializing || state.uploadsInFlight > 0 || state.submissionsInFlight > 0 || waitingForDepth;
+    }
+
     function updateTabs(){
         el.operationTabs?.querySelectorAll('[data-operation]').forEach(button => {
             const active = button.dataset.operation === state.operation;
@@ -579,8 +594,7 @@
         el.modeToggle?.querySelectorAll('[data-mode]').forEach(button => {
             button.classList.toggle('active', button.dataset.mode === state.mode);
         });
-        const generateLabel = el.generateButton?.querySelector('span');
-        if(generateLabel) generateLabel.textContent = t('ecommerce.generate');
+        syncGenerateButtonState();
         const universalLabel = el.operationTabs?.querySelector('[data-operation="universal"] b');
         if(universalLabel) universalLabel.textContent = t(IS_FREE_CREATION ? 'freeCreation.title' : 'ecommerce.universal');
         if(IS_FREE_CREATION) {
@@ -619,6 +633,7 @@
     }
 
     function renderInputs(){
+        syncGenerateButtonState();
         clearAnalysisPreview();
         if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(el.inputSlots)) {
             window.StudioFocusGuard.deferDomUpdate('ecommerce-render-inputs', renderInputs);
@@ -3055,10 +3070,8 @@
         if(!sourceUrl) throw new Error('请先添加姿势图');
         const model = await fetchJson('/api/person-depth/component/status', {cache:'no-store'});
         const tier = String(model.model_tier || '');
-        if(workspace.poseDepth?.source_url === sourceUrl && workspace.poseDepth?.tier === tier && workspace.poseDepth?.url) {
-            const cached = await fetch(workspace.poseDepth.url, {method:'HEAD', cache:'no-store'}).catch(() => null);
-            if(cached?.ok) return workspace.poseDepth;
-        }
+        if(workspace.poseDepth?.source_url === sourceUrl && workspace.poseDepth?.tier === tier
+            && workspace.poseDepth?.status === 'ready' && workspace.poseDepth?.url) return workspace.poseDepth;
         const key = `${sourceUrl}|${tier}`;
         if(poseDepthPromises.has(key)) return poseDepthPromises.get(key);
         const promise = (async () => {
@@ -3312,10 +3325,7 @@
             return;
         }
         clearFormError();
-        el.generateButton.disabled = true;
-        const originalLabel = el.generateButton.querySelector('span')?.textContent || '';
-        const label = el.generateButton.querySelector('span');
-        if(label) label.textContent = t('ecommerce.uploading');
+        state.uploadsInFlight += 1;
         const activePairs = uploadPairs.map(applyPreviewInput);
         renderInputs();
         validateForm(false);
@@ -3344,8 +3354,7 @@
                 showFormError(`${t('ecommerce.uploadFailed')}（${failures.length}/${activePairs.length}）：${detail}`);
             }
         } finally {
-            el.generateButton.disabled = false;
-            if(label) label.textContent = originalLabel;
+            state.uploadsInFlight = Math.max(0, state.uploadsInFlight - 1);
             updateTabs();
         }
     }
@@ -4437,6 +4446,7 @@
         clearFormError();
         state.submissionsInFlight += 1;
         el.generateButton.classList.add('submitting');
+        syncGenerateButtonState();
         try {
             let payload = JSON.parse(JSON.stringify(ecommerceTaskPayload(parentTaskId)));
             if(payload.operation === 'pose_transfer' && payload.options.pose_source === 'reference') {
@@ -4496,6 +4506,7 @@
         } finally {
             state.submissionsInFlight = Math.max(0, state.submissionsInFlight - 1);
             el.generateButton.classList.toggle('submitting', state.submissionsInFlight > 0);
+            syncGenerateButtonState();
         }
     }
 
@@ -5151,7 +5162,7 @@
         updateTabs();
         renderInputs();
         renderOperationControls();
-        if(el.generateButton) el.generateButton.disabled = true;
+        syncGenerateButtonState();
         el.ecommercePage?.setAttribute('aria-busy', 'true');
     }
 
@@ -5202,7 +5213,7 @@
             if(state.currentTask) renderTaskResult(state.currentTask);
             if(el.inputSlots) el.inputSlots.scrollLeft=saved.scroll?.[0] || 0;
             if(document.scrollingElement) document.scrollingElement.scrollTop=saved.scroll?.[1] || 0;
-            if(el.generateButton && state.capabilities) el.generateButton.disabled=false;
+            syncGenerateButtonState();
         });
         if(restored && state.preferencePending) persistSettings();
         if(state.workspaces.pose_transfer?.inputs?.pose?.url && !state.workspaces.pose_transfer.poseDepth?.url) preparePoseDepthInBackground();
@@ -5212,13 +5223,14 @@
         const tasksTask = loadTasks();
         state.initializing = false;
         el.ecommercePage?.setAttribute('aria-busy', 'false');
+        syncGenerateButtonState();
         void Promise.allSettled([capabilitiesTask, tasksTask]).then(async () => {
             const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem(CURRENT_TASK_KEY);
             if(!restored && startupValid() && savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
-            if(el.generateButton) el.generateButton.disabled = false;
+            syncGenerateButtonState();
         }).catch(error => {
             console.warn('ecommerce deferred bootstrap failed', error);
-            if(el.generateButton) el.generateButton.disabled = false;
+            syncGenerateButtonState();
         });
     }
 

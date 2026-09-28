@@ -84,6 +84,8 @@
         "ecommerce.generatePreview": { zh:"生成预览", en:"Generate Preview" },
         "ecommerce.generatePublish": { zh:"生成上架候选", en:"Generate Listing Candidates" },
         "ecommerce.generate": { zh:"开始生成", en:"Generate" },
+        "ecommerce.poseDepthPreparing": { zh:"深度图提取中...", en:"Extracting depth map..." },
+        "ecommerce.poseDepthFailed": { zh:"深度图提取失败", en:"Depth extraction failed" },
         "ecommerce.resetCompare": { zh:"对比复位", en:"Reset Compare" },
         "ecommerce.emptyTitle": { zh:"准备好素材后开始生成", en:"Add assets to start" },
         "ecommerce.emptyHint": { zh:"结果会保留为独立版本，原图不会被覆盖", en:"Every result is versioned; originals are never overwritten" },

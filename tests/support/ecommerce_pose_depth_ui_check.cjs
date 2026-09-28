@@ -7,6 +7,12 @@ const {chromium} = require('playwright');
         const page = await browser.newPage();
         let uploads = 0;
         let estimates = 0;
+        let releaseFirstDepth;
+        const firstDepthReady = new Promise(resolve => { releaseFirstDepth = resolve; });
+        let depthHeadRequests = 0;
+        page.on('request', request => {
+            if(request.url().includes('depth=') && request.method() === 'HEAD') depthHeadRequests += 1;
+        });
         await page.route('**/api/**', route => {
             const path = new URL(route.request().url()).pathname;
             if(path === '/api/ecommerce/capabilities') return route.fulfill({json:{models:[{provider_id:'demo',model:'demo-image',max_reference_images:8}],providers:[{id:'demo',name:'Demo'}],routes:{standard:{provider_id:'demo',model:'demo-image'}},vision_analysis:{enabled:false},pose_presets:[{id:'standing_front',name:'正面站立'}],reference_slot_types:[]}});
@@ -15,7 +21,9 @@ const {chromium} = require('playwright');
             if(path === '/api/ecommerce/pose-depth') {
                 const source = route.request().postDataJSON().source_url;
                 estimates += 1;
-                return route.fulfill({json:{url:`/static/images/logo.png?depth=${estimates}`,source_url:source,tier:'quality'}});
+                const estimate = estimates;
+                return (estimate === 1 ? firstDepthReady : Promise.resolve()).then(() =>
+                    route.fulfill({json:{url:`/static/images/logo.png?depth=${estimate}`,source_url:source,tier:'quality'}}));
             }
             if(path === '/api/ecommerce/tasks' && route.request().method() === 'POST') {
                 return route.fulfill({json:{id:'pose-depth-check',task_id:'pose-depth-check',operation:'pose_transfer',status:'queued',created_at:Date.now()/1000}});
@@ -33,7 +41,12 @@ const {chromium} = require('playwright');
             }, `${role}.png`);
             await page.locator(`.ec-upload-slot[data-role="${role}"] img[src*="upload="]`).waitFor();
         }
+        await page.getByRole('button', {name:'深度图提取中...'}).waitFor();
+        assert.equal(await page.locator('#generateButton').isDisabled(), true, '提取完成前不能提交生成');
+        releaseFirstDepth();
         await page.locator('.ec-upload-slot[data-role="pose"] .ec-pose-depth-status img').waitFor();
+        await page.getByRole('button', {name:'开始生成'}).waitFor();
+        assert.equal(await page.locator('#generateButton').isEnabled(), true, '提取完成后按钮应恢复可用');
         assert.equal(estimates, 1, '添加姿势图后应立即提取一次深度图');
         await page.locator('.ec-upload-slot[data-role="pose"]').evaluate(slot => {
             const transfer = new DataTransfer();
@@ -51,6 +64,7 @@ const {chromium} = require('playwright');
         assert.equal(submitted.options.pose_depth.source_url, submitted.inputs.find(item => item.role === 'pose').url);
         assert.match(submitted.options.pose_depth.url, /depth=2/);
         assert.equal(estimates, 2, '提交时应复用当前姿势图已提取的深度图');
+        assert.equal(depthHeadRequests, 0, '提交时不应通过不支持的 HEAD 请求误判深度图失效');
         console.log('pose depth immediate extraction and submission passed');
     } finally {
         await browser.close();

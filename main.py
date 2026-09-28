@@ -20893,6 +20893,8 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
     prompt = snapshot["prompt"]
     if snapshot.get("operation") == "pose_transfer":
         refs = validate_ecommerce_input_roles("pose_transfer", refs, options)
+        if any(item.get("role") == "control_map" for item in refs):
+            raise ValueError("动作迁移深度图由系统自动提取，不能作为输入重复提交")
         pose = next((item for item in refs if (item.get("role") or item.get("reference_type")) == "pose"), None)
         if not pose:
             return refs, prompt, {"status": "not_required", "reason": "preset_pose"}

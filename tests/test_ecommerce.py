@@ -965,6 +965,21 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual(audit["reason"], "preset_pose")
         estimate.assert_not_awaited()
 
+    def test_pose_transfer_rejects_duplicate_input_depth(self):
+        import main
+        refs = [
+            {"role": "source", "url": "/style"},
+            {"role": "pose", "url": "/pose"},
+            {"role": "control_map", "url": "/manual-depth"},
+        ]
+        with patch.object(main, "render_universal_person_depth", new=AsyncMock()) as estimate:
+            with self.assertRaisesRegex(ValueError, "不能作为输入重复提交"):
+                asyncio.run(main.prepare_universal_pose_depth({
+                    "operation": "pose_transfer", "inputs": refs,
+                    "options": {"pose_source": "reference"}, "prompt": "stale",
+                }))
+        estimate.assert_not_awaited()
+
     def test_pose_transfer_uses_pose_background_without_scene_or_studio(self):
         references = [
             {"role": "source", "url": "/assets/input/model.png"},

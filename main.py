@@ -5335,8 +5335,9 @@ def save_generated_images_to_user_directory(record: Dict[str, Any]) -> None:
         print(f"保存生成图片到用户目录失败: {exc}")
 
 
-def save_to_history(record):
-    save_generated_images_to_user_directory(record)
+def save_to_history(record, export_generated_files_first=True):
+    if export_generated_files_first:
+        save_generated_images_to_user_directory(record)
     with HISTORY_LOCK:
         if "timestamp" not in record:
             record["timestamp"] = time.time()
@@ -21315,7 +21316,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     batch = apply_lookbook_film_finish(batch, snapshot)
                 if snapshot["operation"] != "try_on":
                     batch = await apply_selected_studio_background(batch, snapshot, route)
-                if snapshot["operation"] in {"universal", "try_on", "pose_transfer"}:
+                if snapshot["operation"] in {"universal", "try_on"}:
                     fabric_refs = [*snapshot["inputs"], *[ref for ref in generation_refs if ref.get("role") == "control_map"]] if snapshot["operation"] == "try_on" else snapshot["inputs"]
                     batch = await apply_fabric_enhancement(snapshot["operation"], fabric_refs, batch, {
                         'infer_output_depth': snapshot['operation'] in {'universal', 'pose_transfer'},
@@ -21391,7 +21392,10 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     result["lookbook_stage_timings"] = timings
                     update_ecommerce_task(task_id, {"lookbook_stage_timings": timings})
                 completion_message = lookbook_completion_message(lookbook_quality) if lookbook_agent else "图片已生成。"
-                save_to_history(result)
+                if snapshot["operation"] == "pose_transfer":
+                    # 原图直接入库；导出副本随后执行，避免长时间复制阻挡作品与完成状态。
+                    result["id"] = task_id
+                save_to_history(result, export_generated_files_first=snapshot["operation"] != "pose_transfer")
                 if GLOBAL_LOOP:
                     asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
                 if lookbook_agent:
@@ -21410,6 +21414,15 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "model": result["model"],
                     "route_attempts": failures + [{"route": public_ecommerce_route(route), "status": "succeeded"}],
                 })
+                if snapshot["operation"] == "pose_transfer":
+                    try:
+                        await asyncio.to_thread(save_generated_images_to_user_directory, result)
+                        with HISTORY_LOCK:
+                            DATABASE.prepend_history(result, limit=5000)
+                        update_ecommerce_task(task_id, {"result": result})
+                        publish_entity_changed("history", "global")
+                    except Exception as export_exc:
+                        print(f"动作迁移成品副本保存失败：{export_exc}")
                 return
             except Exception as exc:
                 detail = str(getattr(exc, "detail", None) or exc)

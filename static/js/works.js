@@ -321,8 +321,9 @@
     let worksLoadId = 0;
     let worksLoadController = null;
     let lastForegroundRefresh = 0;
-    function refreshOnForeground(){
-        if(document.hidden || Date.now()-lastForegroundRefresh<1500) return;
+    function refreshOnForeground(force=false){
+        if(window.frameElement && !window.frameElement.classList.contains('active')) return;
+        if(document.hidden || (!force && Date.now()-lastForegroundRefresh<1500)) return;
         lastForegroundRefresh=Date.now();
         void loadWorks({reset:true,preserve:true});
     }
@@ -670,6 +671,10 @@
         window.addEventListener('blur',()=>{state.shiftPressed=false;});
         window.addEventListener('focus',refreshOnForeground);
         document.addEventListener('visibilitychange',refreshOnForeground);
+        window.addEventListener('message',event=>{
+            if(event.origin && event.origin !== location.origin) return;
+            if(event.data?.type === 'studio-route-active' && event.data.active) refreshOnForeground(true);
+        });
         setInterval(()=>{
             if(!document.hidden && (!window.frameElement || window.frameElement.getClientRects().length)) refreshOnForeground();
         },15000);

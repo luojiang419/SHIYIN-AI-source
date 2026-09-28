@@ -583,6 +583,7 @@
             el.universalDock?.setAttribute('aria-label', t('freeCreation.referenceAssets'));
         }
         syncUniversalLayout();
+        if(state.operation !== 'try_on') syncTryOnGuidePanel();
         const inputHeading = el.inputModule?.querySelector('.ec-section-head h2');
         if(inputHeading) inputHeading.textContent = t(IS_FREE_CREATION ? 'freeCreation.referenceAssets' : (currentConfig()?.universal ? 'ecommerce.referenceAssets' : 'ecommerce.inputs'));
         const resultHeading = document.querySelector('.ec-result-head h2');
@@ -2632,17 +2633,20 @@
             slot.addEventListener('dragover', event => {
                 if(!isFileDrag(event)) return;
                 event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = 'copy';
                 slot.classList.add('dragover');
             });
             slot.addEventListener('dragleave', event => {
                 if(!slot.contains(event.relatedTarget)) slot.classList.remove('dragover');
             });
             slot.addEventListener('drop', event => {
+                if(!isFileDrag(event)) return;
                 event.preventDefault();
+                event.stopPropagation();
                 slot.classList.remove('dragover');
                 const files = droppedFiles(event.dataTransfer);
                 if(!files.length) return;
-                event.stopPropagation();
                 if(role === 'source' && slot.dataset.tryonModelEmptyIndex !== undefined) state.activeUploadModelIndex = Number(slot.dataset.tryonModelEmptyIndex);
                 if(currentConfig()?.universal) handleDroppedUniversalFiles(files, role);
                 else if(state.operation === 'try_on' && isTryOnReferenceRole(role)) {
@@ -2650,9 +2654,7 @@
                     else handleSelectedFiles(files, role);
                 }
                 else {
-                    const file = files.find(isSupportedImageFile);
-                    if(file) handleSelectedFile(file, role);
-                    else showFormError(t('ecommerce.invalidImage'));
+                    void handleSelectedFiles(files, role);
                 }
             });
         });

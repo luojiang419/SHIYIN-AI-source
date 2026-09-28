@@ -28,6 +28,12 @@ def save_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+def ab_report():
+    """两版固定对照：A=07、B=08；原候选页独立存档。"""
+    template = ROOT / 'tools/pose-transfer-ab-compare.html'
+    (BASE/'compare.html').write_text(template.read_text(encoding='utf-8'), encoding='utf-8')
+
+
 def report(main):
     rows = [
         ('A','动作参考','pose.jpg','仅提供动作。'),
@@ -84,7 +90,8 @@ for(const button of document.querySelectorAll('[data-region]'))button.onclick=()
 for(const item of entries.filter(x=>/^\\d+$/.test(x.id))){const card=document.createElement('article');card.className='card';card.innerHTML=`<a href="${item.file}" target="_blank"><img loading="lazy" src="${item.file}" alt="${item.id} ${item.title}"></a><h3>${item.id} · ${item.title}</h3><p>${item.note}</p>`;for(const side of ['left','right']){const b=document.createElement('button');b.textContent=side==='left'?'放到左侧':'放到右侧';b.onclick=()=>{document.getElementById(side).value=item.id;paint(side);document.getElementById('regions').scrollIntoView({behavior:'smooth'})};card.append(b)}document.getElementById('cards').append(card)}
 for(const item of entries.slice(0,3)){const el=document.createElement('div');el.innerHTML=`<a href="${item.file}" target="_blank"><img loading="lazy" src="${item.file}" alt="${item.title}"></a><p>${item.title}</p>`;document.getElementById('sources').append(el)}
 </script></html>'''
-    (BASE/'compare.html').write_text(html.replace('__ENTRIES__', json.dumps(entries,ensure_ascii=False)), encoding='utf-8')
+    (BASE/'compare-all-candidates.html').write_text(html.replace('__ENTRIES__', json.dumps(entries,ensure_ascii=False)), encoding='utf-8')
+    ab_report()
     print(json.dumps(entries,ensure_ascii=False), flush=True)
 
 
@@ -185,6 +192,9 @@ async def generate(main, name, template, control=None):
 
 
 async def run(mode):
+    if mode == 'ab':
+        ab_report()
+        return
     import main
     OUT.mkdir(parents=True, exist_ok=True)
     if mode == 'report':
@@ -208,5 +218,5 @@ async def run(mode):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['prepare','repeat','proxy','report'])
+    parser.add_argument('mode', choices=['prepare','repeat','proxy','report','ab'])
     asyncio.run(run(parser.parse_args().mode))

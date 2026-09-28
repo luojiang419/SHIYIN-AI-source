@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>动作迁移 · A / B 两版对比</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:#192734;font:15px/1.6 system-ui,"Microsoft YaHei",sans-serif}main{max-width:1500px;margin:auto;padding:24px}h1{font-size:28px;margin:0 0 8px}p{margin:8px 0}.muted{color:#62707c}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 12px;position:sticky;top:0;background:#f3f5f7;padding:10px 0;z-index:2}button{font:inherit;border:1px solid #c7d1da;border-radius:8px;padding:9px 16px;background:white;color:inherit;cursor:pointer}button.active{background:#203e53;color:white}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}.pane{background:white;border:1px solid #dce2e8;border-radius:12px;padding:16px;min-width:0}.heading{display:flex;align-items:center;gap:12px}.letter{display:grid;place-items:center;width:48px;height:48px;border-radius:9px;background:#e5eef9;color:#245787;font-size:30px;font-weight:750}.b .letter{background:#f5eadb;color:#8b5a1e}h2{font-size:20px;margin:0}.sub{font-size:13px;color:#64717b}.viewport{position:relative;margin-top:14px;background:#f0f2f4;aspect-ratio:9/10}.viewport img,.viewport canvas{width:100%;height:100%;display:block;object-fit:contain}.viewport canvas{position:absolute;inset:0}.viewport canvas[hidden]{display:none}.note{min-height:52px}.original{display:block;color:#235d86;margin-top:8px}.help{padding:14px 18px;background:#eaf0f4;border-radius:9px;margin-top:18px}.archive{margin-top:24px;font-size:13px}.archive a{color:#66727c}@media(max-width:700px){main{padding:12px}.pair{gap:8px}.pane{padding:8px}.letter{width:36px;height:36px;font-size:24px}.heading{gap:6px}h2{font-size:16px}.sub{font-size:11px}.note{font-size:13px}h1{font-size:23px}button{padding:8px 12px}}
+</style>
+<main>
+<h1>只看这两版：A 与 B</h1>
+<p class="muted">左边固定为原深度方案，右边固定为新深度方案。两张为此前真实成图，本次没有重新生成或修图。</p>
+<div class="toolbar" aria-label="同步查看区域">
+<button data-region="all" class="active" aria-pressed="true">整图</button>
+<button data-region="hem" aria-pressed="false">裤脚 / 鞋</button>
+<button data-region="seam" aria-pressed="false">大腿 / 斜缝</button>
+<button data-region="waist" aria-pressed="false">腰头 / 口袋</button>
+</div>
+<div class="pair">
+<section class="pane a">
+<div class="heading"><span class="letter">A</span><div><h2>原深度方案</h2><div class="sub">原动作深度 + 产品双视角 · 原编号 07</div></div></div>
+<div class="viewport"><img id="imageA" src="followup/depth-only-repeat.png" alt="A版：原深度方案"><canvas id="canvasA" width="900" height="1000" hidden></canvas></div>
+<p class="note">前脚更朝画面左侧，动作更接近参考；裤脚相对收一些。</p>
+<a class="original" href="followup/depth-only-repeat.png" target="_blank" rel="noopener">查看 A 原尺寸 ↗</a>
+</section>
+<section class="pane b">
+<div class="heading"><span class="letter">B</span><div><h2>新深度方案</h2><div class="sub">去下肢旧衣轮廓 + 产品双视角 · 原编号 08</div></div></div>
+<div class="viewport"><img id="imageB" src="followup/proxy-regular.png" alt="B版：新深度方案"><canvas id="canvasB" width="900" height="1000" hidden></canvas></div>
+<p class="note">裤脚看起来更舒展；前脚更朝正面，腿部姿态略有变化。</p>
+<a class="original" href="followup/proxy-regular.png" target="_blank" rel="noopener">查看 B 原尺寸 ↗</a>
+</section>
+</div>
+<p class="help"><strong>先点“裤脚 / 鞋”看区别。</strong>整体效果确实接近，主要差别在脚尖方向、裤脚展开和腿部位置。左右同步放大同一画面区域，图片不拉伸；放大比较不代表物理尺寸测量。最终可直接告诉我选 A 或 B。</p>
+<p id="error" role="status"></p>
+<p class="archive">其他实验已移出本页，需要回查时可打开 <a href="compare-all-candidates.html">全部实验存档</a>。</p>
+</main>
+<script>
+let region='all';
+const boxes={hem:[.28,.64,.50,.36],seam:[.34,.25,.40,.34],waist:[.28,.06,.47,.28]};
+function paint(side){
+ const image=document.getElementById('image'+side),canvas=document.getElementById('canvas'+side);
+ canvas.hidden=region==='all';image.style.visibility=region==='all'?'visible':'hidden';
+ if(region==='all'||!image.complete||!image.naturalWidth)return;
+ const [x,y,w,h]=boxes[region],sw=image.naturalWidth*w,sh=image.naturalHeight*h,scale=Math.min(canvas.width/sw,canvas.height/sh),ctx=canvas.getContext('2d');
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(image,image.naturalWidth*x,image.naturalHeight*y,sw,sh,(canvas.width-sw*scale)/2,(canvas.height-sh*scale)/2,sw*scale,sh*scale);
+}
+for(const side of ['A','B']){
+ const image=document.getElementById('image'+side);image.onload=()=>paint(side);
+ image.onerror=()=>{document.getElementById('error').textContent='图片载入失败，请点击对应原尺寸链接查看。'};
+}
+for(const button of document.querySelectorAll('[data-region]'))button.onclick=()=>{
+ region=button.dataset.region;
+ document.querySelectorAll('[data-region]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-pressed',String(b===button));});
+ paint('A');paint('B');
+};
+</script>
+</html>

@@ -11866,6 +11866,8 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
         contract = "这是主图同款服装的局部细节特写，只补充真实织纹、纱线尺度、走线密度及可定位的拼缝、口袋或脚口结构。主图继续决定整衣版型与颜色；细节图不能提供姿势、人物、机位、背景，不能将局部线迹复制到其他部位。"
     elif (ref or {}).get("reference_id") == "universal_pose_anchor":
         contract = "这是最终照片的唯一编辑底图。保留整个人物身份、头部与身体朝向、关节、交叠肢体、脚的位置、场景和构图，只编辑指定商品及其必要轮廓区域，绝不能根据商品穿着者转身或重新构图。"
+    elif role == "control_map" and (ref or {}).get("reference_id") == "pose_transfer_depth":
+        contract = "这是紧邻动作参考图、从同一张图提取的人物深度图。只锁定关节、身体朝向、前后遮挡和画面位置；灰度与动作图人物的脸、衣服、鞋、面料、服装轮廓均不得成为最终外观。最终身份和整套服装以保留款原图为准。"
     elif role == "control_map" and (ref or {}).get("reference_id") == "derived_pose_depth":
         contract = "这是紧邻动作图的人物深度辅助，只提供头部转向、肢体关节、前后遮挡与空间结构。动作必须保持画面左右方向，不能镜像。深度图旧衣的轮廓与褶皱不能覆盖新商品的宽松量、裤型、腰头和版型。"
     elif role == "control_map" and "深度" in label:
@@ -20889,6 +20891,26 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
     if snapshot.get("operation") == "universal" and options.get("generation_style") in {"standard_product", "lookbook"} and options.get("prompt_policy") not in {"free", "lookbook"}:
         refs = universal_style_references(refs, options["generation_style"], bool(options.get("instruction")))
     prompt = snapshot["prompt"]
+    if snapshot.get("operation") == "pose_transfer":
+        refs = validate_ecommerce_input_roles("pose_transfer", refs, options)
+        pose = next((item for item in refs if (item.get("role") or item.get("reference_type")) == "pose"), None)
+        if not pose:
+            return refs, prompt, {"status": "not_required", "reason": "preset_pose"}
+        if len(refs) >= ONLINE_IMAGE_REFERENCE_MAX:
+            raise ValueError("动作迁移需要为动作深度图预留一个参考图位置，请减少一张素材")
+        path = output_file_from_url(pose.get("url") or "")
+        if not path or not os.path.isfile(path):
+            raise ValueError("动作参考图不可读取，无法生成深度图")
+        depth_bytes, tier = await render_universal_person_depth(path)
+        destination = Path(OUTPUT_OUTPUT_DIR) / f"pose_transfer_depth_{uuid.uuid4().hex}.png"
+        destination.write_bytes(depth_bytes)
+        url = media_url_from_path(str(destination))
+        depth_ref = {"url": url, "role": "control_map", "reference_type": "control_map",
+                     "label": "动作迁移人物深度图", "reference_id": "pose_transfer_depth"}
+        refs.insert(refs.index(pose) + 1, depth_ref)
+        prompt = build_ecommerce_prompt("pose_transfer", refs, options)
+        return refs, prompt, {"status": "succeeded", "url": url, "source_url": pose["url"],
+                              "reference_index": refs.index(depth_ref) + 1, "tier": tier}
     if snapshot.get("operation") == "try_on":
         if any(item.get("reference_type") == "control_map" for item in refs):
             return refs, prompt, {"status": "provided"}
@@ -21176,7 +21198,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     routes = list(snapshot.get("route_candidates") or [])
     failures = []
     try:
-        if snapshot["operation"] == "try_on":
+        if snapshot["operation"] in {"try_on", "pose_transfer"}:
             update_ecommerce_task(task_id, {"progress_status": "正在提取动作深度图…"})
         prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
         if snapshot["operation"] == "pose_transfer":

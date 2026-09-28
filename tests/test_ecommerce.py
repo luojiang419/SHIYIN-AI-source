@@ -919,6 +919,52 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("pose reference image as the exact spatial template", prompt)
         self.assertNotIn("Apply this target pose:", prompt)
 
+    def test_pose_transfer_depth_is_registered_next_to_pose_without_changing_style_owner(self):
+        import main
+        references = [
+            {"role": "source_view_1", "url": "/side"},
+            {"role": "pose", "url": "/pose"},
+            {"role": "source", "url": "/style"},
+            {"role": "fabric_detail", "url": "/detail"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            pose_file = Path(directory) / "pose.jpg"
+            pose_file.write_bytes(b"pose")
+            with (
+                patch.object(main, "OUTPUT_OUTPUT_DIR", directory),
+                patch.object(main, "output_file_from_url", return_value=str(pose_file)),
+                patch.object(main, "render_universal_person_depth", new=AsyncMock(return_value=(b"depth", "quality"))) as estimate,
+                patch.object(main, "media_url_from_path", side_effect=lambda path: "/output/" + Path(path).name),
+            ):
+                refs, prompt, audit = asyncio.run(main.prepare_universal_pose_depth({
+                    "operation": "pose_transfer", "inputs": references,
+                    "options": {"pose_source": "reference"}, "prompt": "stale",
+                }))
+            self.assertEqual([ref["role"] for ref in refs], ["source", "pose", "control_map", "source_view_1", "fabric_detail"])
+            self.assertEqual([ref["role"] for ref in validate_input_roles("pose_transfer", refs, {"pose_source": "reference"})],
+                             ["source", "pose", "control_map", "source_view_1", "fabric_detail"])
+            self.assertEqual(audit["source_url"], "/pose")
+            self.assertEqual(audit["tier"], "quality")
+            self.assertEqual(audit["reference_index"], 3)
+            self.assertEqual(Path(directory, audit["url"].split("/")[-1]).read_bytes(), b"depth")
+            self.assertIn("REGISTERED POSE GEOMETRY: Image 3", prompt)
+            self.assertIn("source image is the primary owner of every garment's product design", prompt)
+            self.assertIn("LOCAL SAME-SKU DETAIL: Image 5", prompt)
+            estimate.assert_awaited_once_with(str(pose_file))
+            self.assertIn("最终身份和整套服装以保留款原图为准", main.gemini_reference_role_text(refs[2], 3))
+
+    def test_pose_transfer_preset_does_not_extract_depth(self):
+        import main
+        refs = [{"role": "source", "url": "/style"}]
+        with patch.object(main, "render_universal_person_depth", new=AsyncMock()) as estimate:
+            prepared, prompt, audit = asyncio.run(main.prepare_universal_pose_depth({
+                "operation": "pose_transfer", "inputs": refs, "options": {"pose_source": "preset"}, "prompt": "preset",
+            }))
+        self.assertEqual([(item["role"], item["url"]) for item in prepared], [("source", "/style")])
+        self.assertEqual(prompt, "preset")
+        self.assertEqual(audit["reason"], "preset_pose")
+        estimate.assert_not_awaited()
+
     def test_pose_transfer_uses_pose_background_without_scene_or_studio(self):
         references = [
             {"role": "source", "url": "/assets/input/model.png"},

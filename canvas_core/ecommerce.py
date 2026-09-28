@@ -517,15 +517,16 @@ def select_route(catalog: Iterable[dict[str, Any]], mode: str, provider_id: str 
     return candidates[0]
 
 
-def normalize_inputs(inputs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def normalize_inputs(inputs: Iterable[dict[str, Any]], *, allowed_roles: set[str] | None = None) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
+    allowed_roles = ALLOWED_INPUT_ROLES if allowed_roles is None else allowed_roles
     for value in inputs or []:
         if not isinstance(value, dict):
             continue
         role = str(value.get("role") or "").strip().lower()
         url = str(value.get("url") or "").strip()
-        if role not in ALLOWED_INPUT_ROLES or not url or role in seen:
+        if role not in allowed_roles or not url or role in seen:
             continue
         seen.add(role)
         item = {
@@ -853,9 +854,11 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         if plan["conflicts"]:
             raise ValueError("；".join(plan["conflicts"]))
         return plan["inputs"]
-    normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
+    normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(
+        values, allowed_roles=ALLOWED_INPUT_ROLES | {"control_map"} if operation == "pose_transfer" else None,
+    )
     if operation == "pose_transfer":
-        order = {role: index for index, role in enumerate(("source", "pose", "background", *POSE_TRANSFER_VIEW_ROLES, POSE_TRANSFER_DETAIL_ROLE))}
+        order = {role: index for index, role in enumerate(("source", "pose", "control_map", "background", *POSE_TRANSFER_VIEW_ROLES, POSE_TRANSFER_DETAIL_ROLE))}
         normalized.sort(key=lambda item: order.get(item["role"], len(order)))
     roles = {item["role"] for item in normalized}
     if operation == "pose_transfer" and "background" in roles and str(options.get("studio_reference") or "").strip() in {
@@ -1996,6 +1999,15 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
         )
     elif operation == "pose_transfer":
+        pose_index = next((index for index, item in enumerate(normalized, 1) if item["role"] == "pose"), 0)
+        depth_index = next((index for index, item in enumerate(normalized, 1) if item["role"] == "control_map"), 0)
+        depth_lock = (
+            f"REGISTERED POSE GEOMETRY: Image {depth_index} is the person depth map extracted from pose Image {pose_index}, at the same orientation and crop. "
+            "Use the pair to fix the final head and torso orientation, each arm and hand, hip and knee positions, leg crossing, foot placement, foreground overlap, subject scale and screen position. "
+            "Do not mirror, straighten or substitute a generic stance. The grayscale map supplies body geometry only: ignore the pose person's face, clothing, shoes, garment silhouette, fabric and color. "
+            "Fit the source person's identity and source outfit to these fixed joints; retain the source garment's own fit and outer silhouette instead of tracing the old clothes in the depth map. "
+            if pose_index and depth_index else ""
+        )
         detail_index = next((index for index, item in enumerate(normalized, 1) if item["role"] == POSE_TRANSFER_DETAIL_ROLE), 0)
         detail_lock = (
             f"LOCAL SAME-SKU DETAIL: Image {detail_index} is a close-up of the primary source garment. "
@@ -2040,7 +2052,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                 " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, and readable text; the pose reference supplies the final background and environmental light. "
             )
             task = (
-                target + source_preservation +
+                target + source_preservation + depth_lock +
                 "Let the pose reference override the source image for pose and spatial composition. Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
                 + garment_geometry_lock + " "
                 "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; use only the declared background owner, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "

@@ -20901,10 +20901,27 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
         path = output_file_from_url(pose.get("url") or "")
         if not path or not os.path.isfile(path):
             raise ValueError("动作参考图不可读取，无法生成深度图")
-        depth_bytes, tier = await render_universal_person_depth(path)
-        destination = Path(OUTPUT_OUTPUT_DIR) / f"pose_transfer_depth_{uuid.uuid4().hex}.png"
-        destination.write_bytes(depth_bytes)
-        url = media_url_from_path(str(destination))
+        prepared = options.get("pose_depth") if isinstance(options.get("pose_depth"), dict) else None
+        if prepared:
+            if prepared.get("source_url") != pose.get("url"):
+                raise ValueError("预提取深度图与当前姿势图不匹配，请重新提取")
+            url = str(prepared.get("url") or "")
+            depth_path = output_file_from_url(url)
+            if not depth_path or not Path(depth_path).is_file() or not Path(depth_path).name.startswith("pose_transfer_depth_"):
+                raise ValueError("预提取深度图不可读取，请重新提取")
+            try:
+                with Image.open(depth_path) as depth_image:
+                    if depth_image.format != "PNG" or depth_image.mode not in {"L", "I;16"}:
+                        raise ValueError("预提取深度图格式不正确，请重新提取")
+                    depth_image.verify()
+            except (OSError, ValueError) as exc:
+                raise ValueError("预提取深度图格式不正确，请重新提取") from exc
+            tier = str(prepared.get("tier") or "prepared")
+        else:
+            depth_bytes, tier = await render_universal_person_depth(path)
+            destination = Path(OUTPUT_OUTPUT_DIR) / f"pose_transfer_depth_{uuid.uuid4().hex}.png"
+            destination.write_bytes(depth_bytes)
+            url = media_url_from_path(str(destination))
         depth_ref = {"url": url, "role": "control_map", "reference_type": "control_map",
                      "label": "动作迁移人物深度图", "reference_id": "pose_transfer_depth"}
         # 选定原深度方案：动作彩图只用于提取，实际生成以原始深度替换彩图。
@@ -20925,6 +20942,7 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
         return refs, prompt, {"status": "succeeded", "url": url, "source_url": pose["url"],
                               "reference_index": refs.index(depth_ref) + 1, "tier": tier,
                               "strategy": "original_depth_only_v1", "pose_rgb_submitted": False,
+                              "pre_extracted": bool(prepared),
                               "pose_geometry": pose_geometry}
     if snapshot.get("operation") == "try_on":
         if any(item.get("reference_type") == "control_map" for item in refs):
@@ -21701,6 +21719,24 @@ async def generate_lookbook_skill_cover(payload: LookbookSkillCoverRequest):
 async def analyze_ecommerce_request(payload: EcommerceAnalyzeRequest):
     """返回生成前的视觉证据、用户类型优先的组合计划和最终提示词预览。"""
     return await prepare_ecommerce_analysis(payload)
+
+@app.post("/api/ecommerce/pose-depth")
+async def prepare_ecommerce_pose_depth(request: Request, payload: Dict[str, str]):
+    """动作图一经添加即提取深度图，供后续生成任务复用。"""
+    request_identity(request)
+    source_url = str(payload.get("source_url") or "")
+    path = output_file_from_url(source_url)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=400, detail="动作参考图不可读取，无法提取深度图")
+    try:
+        content, tier = await render_universal_person_depth(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    destination = Path(OUTPUT_OUTPUT_DIR) / f"pose_transfer_depth_{uuid.uuid4().hex}.png"
+    destination.write_bytes(content)
+    url = media_url_from_path(str(destination))
+    register_internal_media_object(url, "output", "image", "pose-transfer-depth")
+    return {"url": url, "source_url": source_url, "tier": tier}
 
 @app.post("/api/ecommerce/tasks")
 async def create_ecommerce_task(payload: EcommerceTaskRequest):

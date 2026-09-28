@@ -97,6 +97,8 @@
     const TRY_ON_REQUEST_ROLES = ['model_identity', ...TRY_ON_PREVIEW_LAYER_ORDER, 'detail', 'pose'];
     const TRY_ON_MULTI_REFERENCE_ROLES = ['source', ...TRY_ON_REQUEST_ROLES];
     const tryOnCutoutCache = new Map();
+    const poseDepthPromises = new Map();
+    const POSE_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
 
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:'', generation_style:'standard_product'},
@@ -107,6 +109,7 @@
 
     const createWorkspace = () => ({
         inputs:{},
+        poseDepth:null,
         taskId:'',
         currentTask:null,
         selectedOutput:0,
@@ -389,6 +392,7 @@
                     if(!value || typeof value !== 'object') return;
                     const workspace = state.workspaces[operation] || createWorkspace();
                     workspace.inputs = Object.fromEntries(Object.entries(value.inputs || {}).map(([role,input]) => [role,cleanSavedInput(input,role)]).filter(([,input]) => input));
+                    workspace.poseDepth = value.pose_depth && typeof value.pose_depth === 'object' ? value.pose_depth : null;
                     workspace.taskId = String(value.current_task_id || value.task_id || '');
                     workspace.selectedOutput = Math.max(0, Number(value.selected_output || 0));
                     workspace.compareValue = Math.max(0, Math.min(100, Number(value.compare_value ?? 50)));
@@ -431,6 +435,7 @@
         captureWorkspace();
         return Object.fromEntries(Object.entries(state.workspaces).map(([operation,workspace]) => [operation,{
             inputs:serializableInputs(workspace.inputs || {}),
+            pose_depth:operation === 'pose_transfer' && workspace.poseDepth?.url ? workspace.poseDepth : null,
             current_task_id:String(workspace.currentTask?.id || workspace.currentTask?.task_id || workspace.taskId || ''),
             selected_output:Number(workspace.selectedOutput || 0),
             compare_value:Number(workspace.compareValue ?? 50),
@@ -2533,6 +2538,10 @@
         const actionClass = tryOnStack ? 'ec-upload-actions ec-floating-upload-actions' : 'ec-upload-actions';
         const visibleSlotLabel = tryOnStack ? '' : `<b>${escapeHtml(displayLabel)}</b>`;
         const displayUrl = referenceDisplayUrl(asset);
+        const depth = input.role === 'pose' && state.operation === 'pose_transfer' && asset?.url ? activeWorkspace().poseDepth : null;
+        const depthStatus = depth && depth.source_url === asset?.url
+            ? `<span class="ec-pose-depth-status ${depth.status === 'failed' ? 'is-error' : ''}">${depth.status === 'ready' && depth.url ? `<img src="${escapeHtml(depth.url)}" alt="姿势深度图">深度图已就绪 ✓` : escapeHtml(depth.status === 'failed' ? `深度图失败：${depth.error || '点击重试'}` : '正在提取深度图…')}</span>`
+            : input.role === 'pose' && state.operation === 'pose_transfer' && asset?.url ? '<span class="ec-pose-depth-status">等待提取深度图…</span>' : '';
         if(displayUrl) {
             const stackControls = hasStack ? `<div class="ec-tryon-stack-controls">
                 <button type="button" data-tryon-stack-step="-1" aria-label="${escapeHtml(t('ecommerce.previousReference'))}">‹</button>
@@ -2553,10 +2562,12 @@
                     <div class="ec-upload-info">
                         ${visibleSlotLabel}
                         <span class="${asset.upload_error ? 'is-upload-error' : ''}" title="${escapeHtml(asset.upload_error || asset.name || displayUrl)}">${escapeHtml(asset.uploading ? t('ecommerce.uploading') : (asset.upload_error || formatName(asset.name || displayUrl)))}</span>
+                        ${depthStatus}
                         <div class="${actionClass}">
                             ${actionButton('upload', uploadActionLabel)}
                             ${actionButton('assets', t('ecommerce.fromAssets'))}
                             ${actionButton('remove', t('ecommerce.remove'))}
+                            ${depth?.status === 'failed' ? '<button type="button" data-action="retry-depth">重试深度图</button>' : ''}
                         </div>
                     </div>
                 </div>
@@ -2581,6 +2592,7 @@
                     event.stopPropagation();
                     const action = button.dataset.action;
                     if(action === 'remove') removeInput(role);
+                    if(action === 'retry-depth') preparePoseDepthInBackground();
                     if(action === 'upload') {
                         if(role === 'source' && slot.dataset.tryonModelEmptyIndex !== undefined) state.activeUploadModelIndex = Number(slot.dataset.tryonModelEmptyIndex);
                         openFilePicker(role);
@@ -2958,6 +2970,7 @@
 
     function removeInput(role){
         const existing = state.inputs[role];
+        if(state.operation === 'pose_transfer' && role === 'pose') activeWorkspace().poseDepth = null;
         if(state.operation === 'try_on') state.tryOnPromptPreview = null;
         if(removeTryOnSelectedCandidate(role)) {
             // handled below by the shared render/persist path
@@ -3034,6 +3047,62 @@
             throw new Error(Array.isArray(message) ? message.map(item => item.msg || item).join('; ') : String(message));
         }
         return body || {};
+    }
+
+    async function ensurePoseDepth(){
+        const workspace = state.workspaces.pose_transfer;
+        const sourceUrl = workspace?.inputs?.pose?.url;
+        if(!sourceUrl) throw new Error('请先添加姿势图');
+        const model = await fetchJson('/api/person-depth/component/status', {cache:'no-store'});
+        const tier = String(model.model_tier || '');
+        if(workspace.poseDepth?.source_url === sourceUrl && workspace.poseDepth?.tier === tier && workspace.poseDepth?.url) {
+            const cached = await fetch(workspace.poseDepth.url, {method:'HEAD', cache:'no-store'}).catch(() => null);
+            if(cached?.ok) return workspace.poseDepth;
+        }
+        const key = `${sourceUrl}|${tier}`;
+        if(poseDepthPromises.has(key)) return poseDepthPromises.get(key);
+        const promise = (async () => {
+            workspace.poseDepth = {source_url:sourceUrl, tier, status:'preparing'};
+            if(state.operation === 'pose_transfer') renderInputs();
+            let status = model;
+            if(!status.ready) {
+                if(['idle','missing'].includes(String(status.state || '')) && status.install_available) {
+                    await fetchJson('/api/person-depth/component/install', {method:'POST'});
+                } else if(!POSE_DEPTH_ACTIVE_STATES.has(String(status.state || ''))) throw new Error(status.message || '深度组件尚未就绪');
+                const deadline = Date.now() + 60 * 60 * 1000;
+                while(Date.now() < deadline) {
+                    status = await fetchJson('/api/person-depth/component/status', {cache:'no-store'});
+                    if(status.ready) break;
+                    if(status.state === 'failed') throw new Error(status.message || '深度组件准备失败');
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+                if(!status.ready) throw new Error('深度组件准备超时');
+            }
+            const prepared = await fetchJson('/api/ecommerce/pose-depth', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({source_url:sourceUrl}),
+            });
+            if(!prepared.url || prepared.source_url !== sourceUrl) throw new Error('深度图提取结果不完整');
+            if(workspace.inputs.pose?.url === sourceUrl) {
+                workspace.poseDepth = {...prepared, status:'ready'};
+                persistSettings();
+                if(state.operation === 'pose_transfer') renderInputs();
+            }
+            return prepared;
+        })().catch(error => {
+            if(workspace.inputs.pose?.url === sourceUrl) {
+                workspace.poseDepth = {source_url:sourceUrl, tier, status:'failed', error:String(error.message || error)};
+                persistSettings();
+                if(state.operation === 'pose_transfer') renderInputs();
+            }
+            throw error;
+        }).finally(() => poseDepthPromises.delete(key));
+        poseDepthPromises.set(key, promise);
+        return promise;
+    }
+
+    function preparePoseDepthInBackground(){
+        void ensurePoseDepth().catch(error => showToast(`深度图提取失败：${error.message}`, true));
     }
 
     async function fetchJsonWithTimeout(url, options={}, timeoutMs=6000){
@@ -3210,6 +3279,7 @@
             if(state.operation === 'pose_transfer' && role === 'pose') {
                 currentOptions().pose_source = 'reference';
                 renderOperationControls();
+                preparePoseDepthInBackground();
             }
             if(state.operation === 'pose_transfer' && role === 'background') currentOptions().studio_reference = '';
         }
@@ -3557,6 +3627,7 @@
             item.original_width = Number(item.original_width || selected.width || image.naturalWidth);
             item.original_height = Number(item.original_height || selected.height || image.naturalHeight);
             item.crop_history = history;
+            if(state.operation === 'pose_transfer' && preview.key === 'pose') preparePoseDepthInBackground();
             syncTryOnCurrentCandidate(preview.key);
             renderInputs();
             persistSettings();
@@ -3581,6 +3652,7 @@
         item.name = selected.name || item.name;
         item.width = Number(selected.width || item.width || 0);
         item.height = Number(selected.height || item.height || 0);
+        if(state.operation === 'pose_transfer' && preview.key === 'pose') preparePoseDepthInBackground();
         syncTryOnCurrentCandidate(preview.key);
         renderInputs();
         persistSettings();
@@ -3709,6 +3781,7 @@
                     if(state.operation === 'pose_transfer' && state.activeUploadRole === 'pose') {
                         currentOptions().pose_source = 'reference';
                         renderOperationControls();
+                        preparePoseDepthInBackground();
                     }
                     el.assetDialog.close();
                     renderInputs();
@@ -4366,6 +4439,12 @@
         el.generateButton.classList.add('submitting');
         try {
             let payload = JSON.parse(JSON.stringify(ecommerceTaskPayload(parentTaskId)));
+            if(payload.operation === 'pose_transfer' && payload.options.pose_source === 'reference') {
+                const depth = await ensurePoseDepth();
+                const pose = payload.inputs.find(item => item.role === 'pose');
+                if(!pose || depth.source_url !== pose.url) throw new Error('姿势图已变化，请重新提取深度图后生成');
+                payload.options.pose_depth = {url:depth.url, source_url:depth.source_url, tier:depth.tier};
+            }
             payload = await analyzeBeforeGenerate(payload);
             const task = await fetchJson('/api/ecommerce/tasks', {
                 method:'POST',
@@ -4404,6 +4483,10 @@
                 if(currentOptions().guide_style !== 'none') scheduleTryOnGuidePoll();
             }
         } catch(error) {
+            if(state.operation === 'pose_transfer' && String(error.message || '').includes('预提取深度图')) {
+                activeWorkspace().poseDepth = null;
+                preparePoseDepthInBackground();
+            }
             if(isCompatibleModelError(error.message)) {
                 clearFormError();
                 showResultPreviewError(error.message);
@@ -5122,6 +5205,7 @@
             if(el.generateButton && state.capabilities) el.generateButton.disabled=false;
         });
         if(restored && state.preferencePending) persistSettings();
+        if(state.workspaces.pose_transfer?.inputs?.pose?.url && !state.workspaces.pose_transfer.poseDepth?.url) preparePoseDepthInBackground();
         const startupValid=pageSession?.guard() || (()=>true);
         // 能力和历史任务在后台并行加载，先让页面退出 busy 状态，避免慢接口造成整页空白。
         const capabilitiesTask = loadCapabilities();

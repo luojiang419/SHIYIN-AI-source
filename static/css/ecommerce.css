@@ -101,6 +101,9 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-upload-info .is-upload-error { color:var(--ec-danger); }
 .ec-upload-info b { margin-bottom:5px; font-size:11px; }
 .ec-upload-info span { color:var(--ec-muted); font-size:9px; }
+.ec-page.is-pose-transfer .ec-pose-depth-status { display:flex; align-items:center; gap:5px; margin-top:5px; color:var(--ec-accent); font-weight:700; }
+.ec-page.is-pose-transfer .ec-pose-depth-status img { width:20px; height:20px; border-radius:4px; object-fit:cover; }
+.ec-page.is-pose-transfer .ec-pose-depth-status.is-error { color:var(--ec-danger); }
 .ec-upload-info .ec-upload-actions { margin-top:13px; }
 .ec-universal-guide { padding:12px 13px; border:1px solid var(--ec-border); border-radius:14px; background:var(--ec-accent-soft); }
 .ec-universal-guide strong { font-size:11px; }

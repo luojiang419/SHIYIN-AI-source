@@ -18659,6 +18659,8 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
             [item.model_dump() for item in payload.inputs],
             options,
         )
+        if operation == "pose_transfer" and any(item["role"] == "pose" for item in normalized):
+            options["pose_source"] = "reference"
         if str(options.get("prompt_policy") or "").lower() == "lookbook":
             if len(payload.inputs) > LOOKBOOK_REFERENCE_LIMIT:
                 raise ValueError(f"Lookbook 最多支持{LOOKBOOK_REFERENCE_LIMIT}张参考图，请减少输入后生成")

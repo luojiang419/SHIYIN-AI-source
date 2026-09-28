@@ -1624,6 +1624,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     operation = validate_operation(operation)
     options = options if isinstance(options, dict) else {}
     normalized = validate_input_roles(operation, inputs, options)
+    if operation == "pose_transfer" and any(item["role"] == "pose" for item in normalized):
+        options = {**options, "pose_source": "reference"}
     raw_instruction = str(options.get("instruction") or "")
     instruction = raw_instruction.strip()
     prompt_policy = str(options.get("prompt_policy") or "").strip().lower()

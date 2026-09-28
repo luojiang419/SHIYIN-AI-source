@@ -2677,7 +2677,7 @@
             html = `<div class="ec-field"><span>${escapeHtml(t('ecommerce.poseTransferOwnership'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseSupplementalViewHint'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseFabricDetailHint'))}</span></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.poseSource'))}</span><div class="ec-chip-grid">
                 <button type="button" data-option-button="pose_source" data-value="reference" class="${options.pose_source === 'reference' ? 'active':''}">${escapeHtml(t('ecommerce.uploadPose'))}</button>
                 <button type="button" data-option-button="pose_source" data-value="preset" class="${options.pose_source === 'preset' ? 'active':''}">${escapeHtml(t('ecommerce.posePreset'))}</button>
-            </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.posePreset'))}</span><div id="posePresetGrid" class="ec-chip-grid">${presetButtons('pose_presets', options.pose_preset)}</div></div>${instructionHtml(options.instruction)}`;
+            </div></div>${options.pose_source === 'preset' ? `<div class="ec-field"><span>${escapeHtml(t('ecommerce.posePreset'))}</span><div id="posePresetGrid" class="ec-chip-grid">${presetButtons('pose_presets', options.pose_preset)}</div></div>` : ''}${instructionHtml(options.instruction)}`;
         } else if(state.operation === 'universal') {
             const promptLabelKey = IS_FREE_CREATION ? 'freeCreation.prompt' : 'ecommerce.finalInstruction';
             const promptHintKey = IS_FREE_CREATION ? 'freeCreation.promptHint' : 'ecommerce.finalInstructionHint';

@@ -910,6 +910,15 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("source diagonal thigh panel seam", prompt)
         self.assertIn("explicitly changed in the USER SUPPLEMENT", prompt)
 
+    def test_pose_transfer_reference_ignores_stale_preset_selection(self):
+        references = [
+            {"role": "source", "url": "/assets/input/model.png"},
+            {"role": "pose", "url": "/assets/input/pose.png"},
+        ]
+        prompt = build_prompt("pose_transfer", references, {"pose_source": "preset", "pose_preset": "walking"})
+        self.assertIn("pose reference image as the exact spatial template", prompt)
+        self.assertNotIn("Apply this target pose:", prompt)
+
     def test_pose_transfer_source_design_is_locked_with_preset_and_studio(self):
         references = [{"role": "source", "url": "/assets/input/model.png"}]
         prompt = build_prompt("pose_transfer", references, {"pose_preset": "walking", "studio_reference": "studio_white"})

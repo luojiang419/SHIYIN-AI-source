@@ -3,11 +3,15 @@ import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
+import numpy as np
 from PIL import Image
 
 import main
+from canvas_core.component_profiles import RuntimeCapabilities
+from canvas_core.depth_model_policy import select_depth_model_tier
 
 
 def depth_png():
@@ -75,6 +79,37 @@ class PoseTransferPreparedDepthTests(unittest.TestCase):
             self.assertEqual(Image.open(Path(directory, Path(result["url"]).name)).mode, "L")
             estimate.assert_awaited_once_with(str(source))
             register.assert_called_once()
+
+    def test_auto_mode_uses_lite_for_low_vram_and_cpu_on_pose_upload(self):
+        for capabilities in (
+            RuntimeCapabilities("windows", "x86_64", "cuda", gpu_memory_bytes=6 * 1024**3),
+            RuntimeCapabilities("windows", "x86_64", "cpu"),
+        ):
+            with self.subTest(accelerator=capabilities.accelerator):
+                with tempfile.TemporaryDirectory() as directory:
+                    source = Path(directory, "pose.png")
+                    Image.new("RGB", (8, 12), "white").save(source)
+                    worker = SimpleNamespace(estimate=Mock())
+                    with patch.object(main, "request_identity"), patch.object(
+                        main, "read_app_config", return_value={"depth_model_preference": "auto"}
+                    ), patch.object(
+                        main, "select_depth_model_tier",
+                        side_effect=lambda override: select_depth_model_tier(capabilities, override),
+                    ), patch.object(main, "output_file_from_url", return_value=str(source)), patch.object(
+                        main.DEPTH_MODEL_MANAGER, "public_status", return_value={"ready": True}
+                    ), patch.object(main, "PERSON_DEPTH_WORKER", worker), patch.object(
+                        main, "prepare_dwpose_input", return_value=object()
+                    ), patch.object(
+                        main, "render_depth_image",
+                        return_value=SimpleNamespace(image_gray=np.full((12, 8), 128, dtype=np.uint8)),
+                    ) as lite_estimate, patch.object(main, "OUTPUT_OUTPUT_DIR", directory), patch.object(
+                        main, "media_url_from_path", side_effect=lambda path: "/assets/output/" + Path(path).name
+                    ), patch.object(main, "register_internal_media_object"):
+                        result = asyncio.run(main.prepare_ecommerce_pose_depth(None, {"source_url": "/pose"}))
+                    self.assertEqual(result["tier"], "lite")
+                    self.assertEqual(Image.open(Path(directory, Path(result["url"]).name)).mode, "L")
+                    lite_estimate.assert_called_once()
+                    worker.estimate.assert_not_called()
 
 
 if __name__ == "__main__":

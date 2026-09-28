@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -11,10 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .person_depth_components import PersonDepthComponentManager, PersonDepthComponentUnavailable
+from .person_depth_components import PersonDepthComponentManager, PersonDepthComponentUnavailable, sha256_file
 
 
 PERSON_DEPTH_PROTOCOL_VERSION = 1
+PERSON_DEPTH_WORKER_512_SHA256 = "6743ce4531abfa7afe086cbc1fa92630ab35df52d6d8613bf87c9a5581f06a76"
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,34 @@ class PersonDepthWorkerClient:
                 except Exception:  # noqa: BLE001
                     process.kill()
 
+    @staticmethod
+    def _worker_override_source() -> Optional[Path]:
+        configured = str(os.getenv("CANVAS_PERSON_DEPTH_WORKER_OVERRIDE") or "").strip()
+        if configured:
+            return Path(configured).expanduser().resolve()
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent / "worker-overlays/person-depth-worker-512.exe"
+        return None
+
+    def _worker_command_with_override(self, command: list[str], root: Path) -> list[str]:
+        source = self._worker_override_source()
+        if source is None:
+            return command
+        if not source.is_file() or sha256_file(source) != PERSON_DEPTH_WORKER_512_SHA256:
+            raise PersonDepthComponentUnavailable("512 人物深度 worker 缺失或校验失败")
+        target = root / "runtime/person-depth-worker-512.exe"
+        if not target.is_file() or sha256_file(target) != PERSON_DEPTH_WORKER_512_SHA256:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(target.name + "." + uuid.uuid4().hex + ".tmp")
+            try:
+                shutil.copyfile(source, temporary)
+                if sha256_file(temporary) != PERSON_DEPTH_WORKER_512_SHA256:
+                    raise PersonDepthComponentUnavailable("512 人物深度 worker 复制校验失败")
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return [str(target), *command[1:]]
+
     def _start(self) -> None:
         if self._process and self._process.poll() is None:
             return
@@ -61,6 +92,7 @@ class PersonDepthWorkerClient:
         root = self.component_manager.installation_path()
         if root is None:
             raise PersonDepthComponentUnavailable("高精度人物深度组件尚未就绪")
+        command = [*self._worker_command_with_override(command[:-1], root), command[-1]]
         self._responses = queue.Queue()
         self._stderr_lines = queue.Queue(maxsize=100)
         environment = os.environ.copy()

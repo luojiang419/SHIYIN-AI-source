@@ -919,6 +919,47 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("pose reference image as the exact spatial template", prompt)
         self.assertNotIn("Apply this target pose:", prompt)
 
+    def test_pose_transfer_uses_pose_background_without_scene_or_studio(self):
+        references = [
+            {"role": "source", "url": "/assets/input/model.png"},
+            {"role": "pose", "url": "/assets/input/pose.png"},
+            {"role": "fabric_detail", "url": "/assets/input/detail.png"},
+        ]
+        prompt = build_prompt("pose_transfer", references, {"pose_source": "reference"})
+        self.assertIn("POSE TRANSFER BACKGROUND OWNER: Image 2 supplies the final visible background", prompt)
+        self.assertIn("the pose reference supplies the final background and environmental light", prompt)
+        self.assertNotIn("STUDIO REFERENCE LOCK", prompt)
+        self.assertNotIn("FINAL STUDIO BACKGROUND OVERRIDE", prompt)
+        self.assertNotIn("soft but defined studio lighting", prompt)
+        stale_prompt = build_prompt("pose_transfer", references, {"pose_source": "reference", "studio_reference": "removed_studio"})
+        self.assertIn("Image 2 supplies the final visible background", stale_prompt)
+        self.assertNotIn("FINAL STUDIO BACKGROUND OVERRIDE", stale_prompt)
+
+    def test_pose_transfer_uploaded_background_overrides_pose_background(self):
+        references = [
+            {"role": "fabric_detail", "url": "/assets/input/detail.png"},
+            {"role": "background", "url": "/assets/input/scene.png"},
+            {"role": "pose", "url": "/assets/input/pose.png"},
+            {"role": "source", "url": "/assets/input/model.png"},
+        ]
+        ordered = validate_input_roles("pose_transfer", references, {"pose_source": "reference"})
+        self.assertEqual([item["role"] for item in ordered], ["source", "pose", "background", "fabric_detail"])
+        prompt = build_prompt("pose_transfer", references, {"pose_source": "reference"})
+        self.assertIn("POSE TRANSFER BACKGROUND OWNER: Image 3 exclusively supplies the final location", prompt)
+        self.assertNotIn("Image 2 supplies the final visible background", prompt)
+        with self.assertRaisesRegex(ValueError, "背景参考图与摄影棚只能选择一个"):
+            build_prompt("pose_transfer", references, {"pose_source": "reference", "studio_reference": "studio_white"})
+
+    def test_pose_transfer_without_studio_skips_background_postprocess(self):
+        import main
+        batch = {"images": ["/assets/output/result.png"]}
+        result = asyncio.run(main.apply_selected_studio_background(batch, {"operation": "pose_transfer", "options": {}}, {}))
+        self.assertIs(result, batch)
+        stale_result = asyncio.run(main.apply_selected_studio_background(batch, {"operation": "pose_transfer", "options": {"studio_reference": "removed_studio"}}, {}))
+        self.assertIs(stale_result, batch)
+        text = main.gemini_reference_role_text({"role": "pose", "pose_transfer_background_owner": True}, 2)
+        self.assertIn("最终背景来源", text)
+
     def test_pose_transfer_source_design_is_locked_with_preset_and_studio(self):
         references = [{"role": "source", "url": "/assets/input/model.png"}]
         prompt = build_prompt("pose_transfer", references, {"pose_preset": "walking", "studio_reference": "studio_white"})

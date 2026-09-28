@@ -191,6 +191,7 @@ from canvas_core.topaz_video import (
     topaz_child_environment,
 )
 from canvas_core.ecommerce import (
+    STUDIO_REFERENCE_PRESETS as ECOMMERCE_STUDIO_REFERENCE_PRESETS,
     build_universal_style_prompt as build_ecommerce_universal_style_prompt,
     universal_style_references,
     QUALITY_CHECKS as ECOMMERCE_QUALITY_CHECKS,
@@ -11841,6 +11842,7 @@ GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "full_garment": "仅提供整套服装商品本身，不提供穿着者身份、动作或背景。",
     "detail": "只提供绑定商品对应部位的面料与局部结构。依据可见部位判断前后左右，后袋、后腰调节扣和背面皮牌不得移植到正面。",
     "pose": "只提供动作与空间结构，不提供人物身份、衣服或背景。",
+    "background": "只提供最终场景、背景结构、透视、环境色与环境光，不提供人物身份、动作或服装。",
     "source_view_1": "这是与主图同一款服装的第一个补充视角，只提供主图未展示的真实侧面或背面结构、拼缝走向、口袋位置和裤脚外扩。不能提供最终人物姿势、身份、构图或背景，不能把不可见的背面细节画到正面。",
     "source_view_2": "这是与主图同一款服装的第二个补充视角，只补足主图和上一视角仍未展示的真实结构。按最终机位显示对应物理侧面，不镜像、不复制重复拼缝；不改变主图确定的正面设计或动作图确定的姿势。",
 }
@@ -11857,7 +11859,9 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
         index = max(1, int(fallback_index))
     contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
     if role == "source" and (ref or {}).get("garment_design_owner") is True:
-        contract = "这是动作迁移的最终人物和完整服装原型。裤型、膝下到脚口的宽度变化、斜向拼缝、洗水、牛仔织纹和鞋均以此图为准；动作图只提供姿态与构图，不提供裤腿轮廓或服装设计。"
+        contract = "这是动作迁移的最终人物和完整服装原型。裤型、膝下到脚口的宽度变化、斜向拼缝、洗水、牛仔织纹和鞋均以此图为准；动作图不提供裤腿轮廓或服装设计，最终背景按提示词的背景权属确定。"
+    elif role == "pose" and (ref or {}).get("pose_transfer_background_owner") is True:
+        contract = "这是动作迁移的动作、机位、构图和最终背景来源。保留其可识别场景、空间关系与环境光；人物身份、衣服和商品仍由原图提供。"
     elif role == "fabric_detail" and (ref or {}).get("pose_transfer_detail") is True:
         contract = "这是主图同款服装的局部细节特写，只补充真实织纹、纱线尺度、走线密度及可定位的拼缝、口袋或脚口结构。主图继续决定整衣版型与颜色；细节图不能提供姿势、人物、机位、背景，不能将局部线迹复制到其他部位。"
     elif (ref or {}).get("reference_id") == "universal_pose_anchor":
@@ -18652,6 +18656,10 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         if len(options_json.encode("utf-8")) > options_limit:
             raise ValueError("功能参数过大")
         options = json.loads(options_json)
+        if operation == "pose_transfer" and str(options.get("studio_reference") or "").strip() not in {
+            item["id"] for item in ECOMMERCE_STUDIO_REFERENCE_PRESETS
+        }:
+            options["studio_reference"] = ""
         if operation == "universal":
             options.pop("reference_analysis", None)
         normalized = validate_ecommerce_input_roles(
@@ -20666,7 +20674,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
 
 async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Dict[str, Any]:
     studio_reference = str((snapshot.get("options") or {}).get("studio_reference") or "").strip()
-    if not studio_reference or snapshot.get("operation") == "background_change":
+    if studio_reference not in {item["id"] for item in ECOMMERCE_STUDIO_REFERENCE_PRESETS} or snapshot.get("operation") == "background_change":
         return batch
     images = list(batch.get("images") or [])
     if not images:
@@ -21172,8 +21180,12 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
             update_ecommerce_task(task_id, {"progress_status": "正在提取动作深度图…"})
         prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
         if snapshot["operation"] == "pose_transfer":
+            pose_owns_background = not (snapshot.get("options") or {}).get("studio_reference") and not any(
+                (ref.get("role") or ref.get("reference_type")) == "background" for ref in prepared_refs
+            )
             prepared_refs = [
                 {**ref, "garment_design_owner": True} if (ref.get("role") or ref.get("reference_type")) == "source"
+                else {**ref, "pose_transfer_background_owner": True} if pose_owns_background and (ref.get("role") or ref.get("reference_type")) == "pose"
                 else {**ref, "pose_transfer_detail": True} if (ref.get("role") or ref.get("reference_type")) == "fabric_detail"
                 else ref
                 for ref in prepared_refs

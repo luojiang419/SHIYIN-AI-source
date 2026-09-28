@@ -68,6 +68,7 @@
             inputs:[
                 {role:'source', labelKey:'ecommerce.poseStyleSource', required:true},
                 {role:'pose', labelKey:'ecommerce.poseImage', required:false},
+                {role:'background', labelKey:'ecommerce.backgroundImage', required:false},
                 {role:'source_view_1', labelKey:'ecommerce.poseSupplementalViewOne', required:false},
                 {role:'source_view_2', labelKey:'ecommerce.poseSupplementalViewTwo', required:false},
                 {role:'fabric_detail', labelKey:'ecommerce.poseFabricDetail', required:false},
@@ -2783,6 +2784,10 @@
     function selectStudioReference(id){
         const item = studioReferenceById(id);
         if(!item) return;
+        if(state.operation === 'pose_transfer' && state.inputs.background?.url) {
+            showToast(t('ecommerce.sceneStudioConflict'), true);
+            return;
+        }
         if(currentConfig()?.universal && universalTypedEntries().some(([,reference]) => reference.reference_type === 'scene')) {
             showToast(t('ecommerce.sceneStudioConflict'), true);
             return;
@@ -3202,6 +3207,7 @@
             const uploadedInput = await uploadedInputFor(file, role, uploaded, existing);
             revokeReferencePreviewUrl(existing);
             state.inputs[role] = uploadedInput;
+            if(state.operation === 'pose_transfer' && role === 'background') currentOptions().studio_reference = '';
         }
         return;
     }
@@ -3929,7 +3935,7 @@
         return Object.values(state.inputs).filter(item => {
             if(!item?.url) return false;
             if(item.role === 'pose' && currentOptions().pose_source !== 'reference') return false;
-            if(item.role === 'background' && currentOptions().background_mode !== 'reference') return false;
+            if(item.role === 'background' && state.operation !== 'pose_transfer' && currentOptions().background_mode !== 'reference') return false;
             return true;
         }).map(item => ({url:item.url, name:item.name || '', role:item.role, kind:'image', mime:item.mime || ''}));
     }

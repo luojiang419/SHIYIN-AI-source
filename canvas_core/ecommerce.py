@@ -855,9 +855,13 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         return plan["inputs"]
     normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
     if operation == "pose_transfer":
-        order = {role: index for index, role in enumerate(("source", "pose", *POSE_TRANSFER_VIEW_ROLES, POSE_TRANSFER_DETAIL_ROLE))}
+        order = {role: index for index, role in enumerate(("source", "pose", "background", *POSE_TRANSFER_VIEW_ROLES, POSE_TRANSFER_DETAIL_ROLE))}
         normalized.sort(key=lambda item: order.get(item["role"], len(order)))
     roles = {item["role"] for item in normalized}
+    if operation == "pose_transfer" and "background" in roles and str(options.get("studio_reference") or "").strip() in {
+        item["id"] for item in STUDIO_REFERENCE_PRESETS
+    }:
+        raise ValueError("背景参考图与摄影棚只能选择一个")
     required = set(OPERATION_INPUTS[operation])
     if operation == "pose_transfer" and str(options.get("pose_source") or "preset") == "reference":
         required.add("pose")
@@ -1843,6 +1847,23 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         None,
     )
     selected_studio_prompt = str((selected_studio or {}).get("prompt") or "").strip()
+    pose_transfer_background_index = next((index for index, item in enumerate(normalized, 1) if operation == "pose_transfer" and item["role"] == "background"), 0)
+    pose_transfer_pose_index = next((index for index, item in enumerate(normalized, 1) if operation == "pose_transfer" and item["role"] == "pose"), 0)
+    pose_transfer_background_lock = ""
+    if pose_transfer_background_index:
+        pose_transfer_background_lock = (
+            f"POSE TRANSFER BACKGROUND OWNER: Image {pose_transfer_background_index} exclusively supplies the final location, "
+            "background geometry, environmental palette and motivated lighting. Place the source person and outfit into that space "
+            "at the pose reference's camera angle, framing and subject scale when a pose reference exists. "
+            "Do not copy any person, clothing or product from the background image; do not retain the source or pose image background."
+        )
+    elif pose_transfer_pose_index and not studio_background_selected:
+        pose_transfer_background_lock = (
+            f"POSE TRANSFER BACKGROUND OWNER: Image {pose_transfer_pose_index} supplies the final visible background and environment "
+            "as well as the target pose, camera and framing. Preserve its recognizable setting, spatial layout and available light; "
+            "replace only its person and clothing with the source person and outfit. Do not retain the source image background "
+            "or invent a photography studio."
+        )
     immutable_foreground_composition_lock = build_immutable_foreground_composition_lock(operation, normalized, options)
     source_photographic_character_lock = build_source_photographic_character_lock(operation, normalized, options)
 
@@ -2009,37 +2030,41 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                 "shot scale, framing and crop, subject size and position, and foreground composition of the person underneath the clothing. If it is full-body, keep full-body; if it is three-quarter, "
                 "half-body, or close-up, keep the same shot. " + _pose_orientation_lock() + " "
                 "Do not zoom, reframe, extend the body beyond its crop, or reposition the person unless the additional user instruction explicitly requests it. "
-                "Do not copy the pose reference person's identity, clothes, garment outline, accessories, or background content."
+                "Do not copy the pose reference person's identity, clothes, garment outline, or accessories."
             )
             source_preservation = (
                 " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, and lighting; the selected studio replaces the source background. "
                 if studio_background_selected else
-                " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, lighting, and background appearance. "
+                " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, and readable text; the selected background reference replaces the source background. "
+                if pose_transfer_background_index else
+                " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, and readable text; the pose reference supplies the final background and environmental light. "
             )
             task = (
                 target + source_preservation +
-                "Let the pose reference override the source image only for pose and spatial composition. Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
+                "Let the pose reference override the source image for pose and spatial composition. Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
                 + garment_geometry_lock + " "
-                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; do not preserve the source background when a studio is selected, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
+                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; use only the declared background owner, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
                 "Keep product graphics and garment text non-mirrored and readable after the pose change. "
                 + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
-                + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
+                + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE.replace("soft but defined studio lighting", "lighting matched to the declared background owner")
             )
         else:
             target = "Apply this target pose: " + _preset_prompt(POSE_PRESETS, str(options.get("pose_preset") or "standing_front"), "standing_front") + "."
             source_preservation = (
                 " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, and lighting; the selected studio replaces the source background. "
                 if studio_background_selected else
+                " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, and camera framing; the selected background reference replaces the source background. "
+                if pose_transfer_background_index else
                 " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, lighting, and background. "
             )
             task = (
                 target + source_preservation +
                 "Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
                 + garment_geometry_lock + " "
-                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; do not preserve the source background when a studio is selected, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
+                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; use only the declared background owner, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
                 "Keep product graphics and garment text non-mirrored and readable after the pose change. "
                 + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
-                + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
+                + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE.replace("soft but defined studio lighting", "lighting matched to the declared background owner")
             )
     elif operation == "prop_replace":
         target_description = str(options.get("target_description") or "the matching existing prop").strip()
@@ -2089,11 +2114,11 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
         )
 
-    if operation == "pose_transfer" and str(options.get("pose_source") or "preset") == "reference":
+    if operation == "pose_transfer" and pose_transfer_pose_index:
         preservation = (
             "Preserve source identity, clothing, products, and lighting; the selected studio replaces background content. The pose reference replaces the source pose and spatial composition, including camera viewpoint, shot scale, framing, crop, subject placement, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. "
             if studio_background_selected
-            else "Preserve source identity, clothing, products, lighting, and background content. The pose reference replaces the source pose and spatial composition, including camera viewpoint, shot scale, framing, crop, subject placement, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. "
+            else "Preserve source identity, clothing, and products. The pose reference replaces the source pose and spatial composition, including camera viewpoint, shot scale, framing, crop, subject placement, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. "
             "Only an explicit additional user instruction may override the pose reference's spatial constraints. Do not add people, products, text, watermarks, duplicate objects, or extra limbs."
         )
     else:
@@ -2114,7 +2139,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         immutable_foreground_composition_lock,
         TEXT_AND_BRAND_FIDELITY_DIRECTIVE,
         NANO_BANANA_PRO_REFERENCE_DIRECTIVE,
-        NANO_BANANA_PRO_PHOTO_DIRECTIVE,
+        NANO_BANANA_PRO_PHOTO_DIRECTIVE.replace("controlled studio or natural light", "light matched to the declared background owner") if operation == "pose_transfer" else NANO_BANANA_PRO_PHOTO_DIRECTIVE,
         NANO_BANANA_PRO_ECOMMERCE_DIRECTIVE,
         source_photographic_character_lock,
     ]
@@ -2123,6 +2148,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         *[lock for lock in operation_locks if lock],
         preservation,
         build_final_studio_background_override(options),
+        pose_transfer_background_lock,
         user_supplement,
         ("For pose transfer, apply only the attributes explicitly changed in the USER SUPPLEMENT; keep the source garment design and the pose reference ownership for everything else." if operation == "pose_transfer" and instruction else user_supplement_override_rule),
     ]

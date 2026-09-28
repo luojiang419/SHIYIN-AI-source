@@ -21,7 +21,7 @@ def test_verified_512_worker_is_copied_beside_fixed_models(tmp_path):
     ):
         command = client._worker_command_with_override(["original.exe"], root)
         repeated = client._worker_command_with_override(["original.exe"], root)
-    target = root / "runtime/person-depth-worker-512.exe"
+    target = root / "runtime/person-depth-worker-512-vram.exe"
     assert command == repeated == [str(target)]
     assert target.read_bytes() == source.read_bytes()
     assert not list(target.parent.glob("*.tmp"))
@@ -37,3 +37,14 @@ def test_unverified_worker_is_not_installed(tmp_path):
         with pytest.raises(PersonDepthComponentUnavailable, match="校验失败"):
             client._worker_command_with_override(["original.exe"], root)
     assert not (root / "runtime").exists()
+
+
+def test_source_mode_uses_worker_source_and_fixed_component_models(tmp_path):
+    client = PersonDepthWorkerClient(component_manager=None)
+    with patch("canvas_core.person_depth_client.sys.frozen", False, create=True), patch.dict(
+        "canvas_core.person_depth_client.os.environ", {}, clear=True
+    ):
+        command = client._source_worker_command(tmp_path)
+    assert command[0]
+    assert Path(command[1]).name == "worker.py"
+    assert command[2:] == ["--component-root", str(tmp_path), "--stdio"]

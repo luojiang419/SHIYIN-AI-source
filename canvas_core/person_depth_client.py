@@ -17,7 +17,7 @@ from .person_depth_components import PersonDepthComponentManager, PersonDepthCom
 
 
 PERSON_DEPTH_PROTOCOL_VERSION = 1
-PERSON_DEPTH_WORKER_512_SHA256 = "6743ce4531abfa7afe086cbc1fa92630ab35df52d6d8613bf87c9a5581f06a76"
+PERSON_DEPTH_WORKER_512_SHA256 = "2b75ee4c77e759ca0dc3467fabcca81c66696d444d3cefb7e9ea5d67683e70da"
 
 
 @dataclass(frozen=True)
@@ -66,13 +66,22 @@ class PersonDepthWorkerClient:
             return Path(sys.executable).resolve().parent / "worker-overlays/person-depth-worker-512.exe"
         return None
 
+    @staticmethod
+    def _source_worker_command(root: Path) -> Optional[list[str]]:
+        if getattr(sys, "frozen", False) or os.getenv("CANVAS_PERSON_DEPTH_WORKER_OVERRIDE"):
+            return None
+        source = Path(__file__).resolve().parents[1] / "person_depth_worker/worker.py"
+        if source.is_file():
+            return [sys.executable, str(source), "--component-root", str(root), "--stdio"]
+        return None
+
     def _worker_command_with_override(self, command: list[str], root: Path) -> list[str]:
         source = self._worker_override_source()
         if source is None:
             return command
         if not source.is_file() or sha256_file(source) != PERSON_DEPTH_WORKER_512_SHA256:
             raise PersonDepthComponentUnavailable("512 人物深度 worker 缺失或校验失败")
-        target = root / "runtime/person-depth-worker-512.exe"
+        target = root / "runtime/person-depth-worker-512-vram.exe"
         if not target.is_file() or sha256_file(target) != PERSON_DEPTH_WORKER_512_SHA256:
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_name(target.name + "." + uuid.uuid4().hex + ".tmp")
@@ -88,11 +97,13 @@ class PersonDepthWorkerClient:
     def _start(self) -> None:
         if self._process and self._process.poll() is None:
             return
-        command = [*self.component_manager.worker_command(), "--stdio"]
         root = self.component_manager.installation_path()
         if root is None:
             raise PersonDepthComponentUnavailable("高精度人物深度组件尚未就绪")
-        command = [*self._worker_command_with_override(command[:-1], root), command[-1]]
+        command = self._source_worker_command(root)
+        if command is None:
+            original = self.component_manager.worker_command()
+            command = [*self._worker_command_with_override(original, root), "--stdio"]
         self._responses = queue.Queue()
         self._stderr_lines = queue.Queue(maxsize=100)
         environment = os.environ.copy()

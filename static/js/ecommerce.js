@@ -3207,6 +3207,10 @@
             const uploadedInput = await uploadedInputFor(file, role, uploaded, existing);
             revokeReferencePreviewUrl(existing);
             state.inputs[role] = uploadedInput;
+            if(state.operation === 'pose_transfer' && role === 'pose') {
+                currentOptions().pose_source = 'reference';
+                renderOperationControls();
+            }
             if(state.operation === 'pose_transfer' && role === 'background') currentOptions().studio_reference = '';
         }
         return;
@@ -3702,6 +3706,10 @@
                     }
                     if(state.operation === 'try_on' && isTryOnReferenceRole(state.activeUploadRole)) setTryOnInputCandidate(state.activeUploadRole, nextInput);
                     else state.inputs[state.activeUploadRole] = nextInput;
+                    if(state.operation === 'pose_transfer' && state.activeUploadRole === 'pose') {
+                        currentOptions().pose_source = 'reference';
+                        renderOperationControls();
+                    }
                     el.assetDialog.close();
                     renderInputs();
                     validateForm(false);

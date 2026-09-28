@@ -133,7 +133,7 @@
         "ecommerce.garmentImage": { zh:"服装产品图", en:"Garment Image" },
         "ecommerce.personImage": { zh:"人物原图", en:"Person Image" },
         "ecommerce.poseStyleSource": { zh:"保留款原图（人物与服装）", en:"Source style (person and outfit)" },
-        "ecommerce.poseTransferOwnership": { zh:"保留款原图决定人物、服装版型和面料；动作参考图只决定姿势与构图。", en:"The source style owns the person, garment cut, and fabric; the pose reference provides only pose and framing." },
+        "ecommerce.poseTransferOwnership": { zh:"保留款原图决定人物、服装版型、面料和默认背景；动作图自动提取原始深度后用于生成，动作彩图不参与换款。", en:"The source owns the person, garment, fabric and default background. Generation uses the original depth extracted from your pose reference, without submitting its color photo." },
         "ecommerce.poseSupplementalViewOne": { zh:"同款补充视角 1（正侧/侧面）", en:"Same-style view 1 (three-quarter/side)" },
         "ecommerce.poseSupplementalViewTwo": { zh:"同款补充视角 2（可选）", en:"Same-style view 2 (optional)" },
         "ecommerce.poseSupplementalViewHint": { zh:"可追加最多两张同款实拍视角补足侧缝、后袋与裤脚结构；补充图不改变动作、人物或背景。", en:"Add up to two views of the same garment for real side seams, back pockets, and hems. These views do not control pose, person, or background." },

@@ -1627,6 +1627,42 @@ def build_universal_style_prompt(inputs: list[dict[str, Any]], options: dict[str
     return "\n".join(filter(None, parts))
 
 
+def build_pose_depth_prompt(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
+    """已提取原始深度的生成提示；编号仅对应实际提交图，不包含动作彩图。"""
+    options = options or {}
+    refs = list(inputs)
+    roles = {item["role"]: index for index, item in enumerate(refs, 1)}
+    if "source" not in roles or "control_map" not in roles or "pose" in roles:
+        raise ValueError("原深度动作迁移必须提供产品和深度，不能混入动作彩图")
+    source, depth = roles["source"], roles["control_map"]
+    parts = [
+        "Create one realistic fashion product photograph.",
+        f"Image {source} is the PRIMARY PRODUCT AND PERSON reference. Preserve its actual complete outfit, garment cut, color, material, waist and rise, pockets, panel seams, stitching, hem width and depth, original garment length, wash, fabric weave and footwear. Do not redesign or simplify the product.",
+        f"Image {depth} is the ORIGINAL registered person depth extracted from the target pose. It exclusively provides body orientation, joint positions, arm and hand gestures, knee bends, weight shift, limb overlap, foot placement, camera view, subject scale and crop. Read this specific pose; never substitute the product model's stance, mirror the person, or invent a generic crossed-leg pose. Keep visible hands and feet, and do not extend beyond the original crop.",
+        "The depth supplies the BODY INSIDE clothing, not the required garment boundary. Its old clothing, footwear and accessory geometry must not define the new product. Drape the original product around the target joints with its own ease, length and silhouette. If the product flares below the knee, preserve its original knee-to-hem widening outside the depth leg silhouette. Do not shorten long trousers because the pose has bare legs, or narrow a loose garment to trace the depth. Change only pose, articulated draping and physically necessary occlusion.",
+    ]
+    geometry = options.get("pose_geometry") or {}
+    if geometry.get("status") == "succeeded":
+        parts.append("MEASURED TARGET POSE: the following observations describe this specific target pose. Match them together with the original depth; do not exaggerate the action.")
+        parts.extend(str(cue) for cue in geometry.get("cues") or [])
+    for role in POSE_TRANSFER_VIEW_ROLES:
+        if role in roles:
+            parts.append(f"Image {roles[role]} is a SAME-PRODUCT supplemental view. Use its visible side/back construction, seam continuation, pocket shape and hem profile at the correct physical garment surface. Never copy its pose or invent an invisible back pocket on the front.")
+    if POSE_TRANSFER_DETAIL_ROLE in roles:
+        parts.append(f"Image {roles[POSE_TRANSFER_DETAIL_ROLE]} is LOCAL SAME-PRODUCT DETAIL: preserve the matching weave, wash and stitching at its real garment location, not an enlarged print or duplicated seam.")
+    studio = build_studio_reference_lock(options)
+    if studio and "background" in roles:
+        raise ValueError("背景参考图与摄影棚只能选择一个")
+    parts.append(studio or (
+        f"Image {roles['background']} exclusively provides the final background and environmental light; do not copy its people or clothing."
+        if "background" in roles else f"Keep the background and lighting from product Image {source}. The pose depth does not supply background, colors, clothing or accessories."
+    ))
+    if str(options.get("instruction") or "").strip():
+        parts.append("USER SUPPLEMENT: " + str(options["instruction"]).strip())
+    parts.append("Output one photograph without diagrams, captions, comparison panels or a depth-map appearance.")
+    return "\n".join(parts)
+
+
 def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
     operation = validate_operation(operation)
     options = options if isinstance(options, dict) else {}

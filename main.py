@@ -11867,7 +11867,7 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
     elif (ref or {}).get("reference_id") == "universal_pose_anchor":
         contract = "这是最终照片的唯一编辑底图。保留整个人物身份、头部与身体朝向、关节、交叠肢体、脚的位置、场景和构图，只编辑指定商品及其必要轮廓区域，绝不能根据商品穿着者转身或重新构图。"
     elif role == "control_map" and (ref or {}).get("reference_id") == "pose_transfer_depth":
-        contract = "这是紧邻动作参考图、从同一张图提取的人物深度图。只锁定关节、身体朝向、前后遮挡和画面位置；灰度与动作图人物的脸、衣服、鞋、面料、服装轮廓均不得成为最终外观。最终身份和整套服装以保留款原图为准。"
+        contract = "这是从动作参考图提取的原始人物深度图；动作彩图不参与生成。只提供关节、身体朝向、前后遮挡和画面位置；灰度与动作图人物的脸、衣服、鞋、面料、服装轮廓均不得成为最终外观。最终身份和整套服装以保留款原图为准。"
     elif role == "control_map" and (ref or {}).get("reference_id") == "derived_pose_depth":
         contract = "这是紧邻动作图的人物深度辅助，只提供头部转向、肢体关节、前后遮挡与空间结构。动作必须保持画面左右方向，不能镜像。深度图旧衣的轮廓与褶皱不能覆盖新商品的宽松量、裤型、腰头和版型。"
     elif role == "control_map" and "深度" in label:
@@ -20898,8 +20898,6 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
         pose = next((item for item in refs if (item.get("role") or item.get("reference_type")) == "pose"), None)
         if not pose:
             return refs, prompt, {"status": "not_required", "reason": "preset_pose"}
-        if len(refs) >= ONLINE_IMAGE_REFERENCE_MAX:
-            raise ValueError("动作迁移需要为动作深度图预留一个参考图位置，请减少一张素材")
         path = output_file_from_url(pose.get("url") or "")
         if not path or not os.path.isfile(path):
             raise ValueError("动作参考图不可读取，无法生成深度图")
@@ -20909,10 +20907,25 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
         url = media_url_from_path(str(destination))
         depth_ref = {"url": url, "role": "control_map", "reference_type": "control_map",
                      "label": "动作迁移人物深度图", "reference_id": "pose_transfer_depth"}
-        refs.insert(refs.index(pose) + 1, depth_ref)
-        prompt = build_ecommerce_prompt("pose_transfer", refs, options)
+        # 选定原深度方案：动作彩图只用于提取，实际生成以原始深度替换彩图。
+        from canvas_core.ecommerce import build_pose_depth_prompt
+        refs[refs.index(pose)] = depth_ref
+        pose_geometry = {"status": "unavailable"}
+        try:
+            from canvas_core.pose_transfer_geometry import describe_pose_joints
+            with Image.open(path) as original_pose:
+                pose_image = ImageOps.exif_transpose(original_pose).convert("RGB")
+                pose_image.thumbnail((1000, 1000))
+            joints = await asyncio.to_thread(render_dwpose_image, pose_image)
+            if joints.people == 1:
+                pose_geometry = describe_pose_joints(joints.keypoints[0], joints.scores[0], *pose_image.size)
+        except Exception as exc:
+            pose_geometry = {"status": "unavailable", "reason": type(exc).__name__}
+        prompt = build_pose_depth_prompt(refs, {**options, "pose_geometry": pose_geometry})
         return refs, prompt, {"status": "succeeded", "url": url, "source_url": pose["url"],
-                              "reference_index": refs.index(depth_ref) + 1, "tier": tier}
+                              "reference_index": refs.index(depth_ref) + 1, "tier": tier,
+                              "strategy": "original_depth_only_v1", "pose_rgb_submitted": False,
+                              "pose_geometry": pose_geometry}
     if snapshot.get("operation") == "try_on":
         if any(item.get("reference_type") == "control_map" for item in refs):
             return refs, prompt, {"status": "provided"}

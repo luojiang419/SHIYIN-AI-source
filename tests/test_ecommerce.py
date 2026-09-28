@@ -919,7 +919,7 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("pose reference image as the exact spatial template", prompt)
         self.assertNotIn("Apply this target pose:", prompt)
 
-    def test_pose_transfer_depth_is_registered_next_to_pose_without_changing_style_owner(self):
+    def test_pose_transfer_original_depth_replaces_rgb_without_changing_style_owner(self):
         import main
         references = [
             {"role": "source_view_1", "url": "/side"},
@@ -940,18 +940,19 @@ class EcommerceContractTests(unittest.TestCase):
                     "operation": "pose_transfer", "inputs": references,
                     "options": {"pose_source": "reference"}, "prompt": "stale",
                 }))
-            self.assertEqual([ref["role"] for ref in refs], ["source", "pose", "control_map", "source_view_1", "fabric_detail"])
-            self.assertEqual([ref["role"] for ref in validate_input_roles("pose_transfer", refs, {"pose_source": "reference"})],
-                             ["source", "pose", "control_map", "source_view_1", "fabric_detail"])
+            self.assertEqual([ref["role"] for ref in refs], ["source", "control_map", "source_view_1", "fabric_detail"])
+            self.assertFalse(audit["pose_rgb_submitted"])
+            self.assertEqual(audit["strategy"], "original_depth_only_v1")
+            self.assertFalse(any(ref["url"] == "/pose" for ref in refs))
             self.assertEqual(audit["source_url"], "/pose")
             self.assertEqual(audit["tier"], "quality")
-            self.assertEqual(audit["reference_index"], 3)
+            self.assertEqual(audit["reference_index"], 2)
             self.assertEqual(Path(directory, audit["url"].split("/")[-1]).read_bytes(), b"depth")
-            self.assertIn("REGISTERED POSE GEOMETRY: Image 3", prompt)
-            self.assertIn("source image is the primary owner of every garment's product design", prompt)
-            self.assertIn("LOCAL SAME-SKU DETAIL: Image 5", prompt)
+            self.assertIn("Image 2 is the ORIGINAL registered person depth", prompt)
+            self.assertIn("PRIMARY PRODUCT AND PERSON", prompt)
+            self.assertIn("Image 4 is LOCAL SAME-PRODUCT DETAIL", prompt)
             estimate.assert_awaited_once_with(str(pose_file))
-            self.assertIn("最终身份和整套服装以保留款原图为准", main.gemini_reference_role_text(refs[2], 3))
+            self.assertIn("最终身份和整套服装以保留款原图为准", main.gemini_reference_role_text(refs[1], 2))
 
     def test_pose_transfer_preset_does_not_extract_depth(self):
         import main

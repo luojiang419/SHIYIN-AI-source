@@ -2557,6 +2557,8 @@
         const depthStatus = depth && depth.source_url === asset?.url
             ? `<span class="ec-pose-depth-status ${depth.status === 'failed' ? 'is-error' : ''}">${depth.status === 'ready' && depth.url ? `<img src="${escapeHtml(depth.url)}" alt="姿势深度图">深度图已就绪 ✓` : escapeHtml(depth.status === 'failed' ? `深度图失败：${depth.error || '点击重试'}` : '正在提取深度图…')}</span>`
             : input.role === 'pose' && state.operation === 'pose_transfer' && asset?.url ? '<span class="ec-pose-depth-status">等待提取深度图…</span>' : '';
+        const poseCalibration = input.role === 'source' && state.operation === 'pose_transfer' && asset?.url
+            ? (window.PoseTransferCalibration?.cardHtml?.(asset) || '') : '';
         if(displayUrl) {
             const stackControls = hasStack ? `<div class="ec-tryon-stack-controls">
                 <button type="button" data-tryon-stack-step="-1" aria-label="${escapeHtml(t('ecommerce.previousReference'))}">‹</button>
@@ -2578,6 +2580,7 @@
                         ${visibleSlotLabel}
                         <span class="${asset.upload_error ? 'is-upload-error' : ''}" title="${escapeHtml(asset.upload_error || asset.name || displayUrl)}">${escapeHtml(asset.uploading ? t('ecommerce.uploading') : (asset.upload_error || formatName(asset.name || displayUrl)))}</span>
                         ${depthStatus}
+                        ${poseCalibration}
                         <div class="${actionClass}">
                             ${actionButton('upload', uploadActionLabel)}
                             ${actionButton('assets', t('ecommerce.fromAssets'))}
@@ -2601,6 +2604,7 @@
     function bindInputSlots(root=el.inputSlots){
         root?.querySelectorAll('.ec-upload-slot').forEach(slot => {
             const role = slot.dataset.role;
+            window.PoseTransferCalibration?.bindSlot?.(slot, role);
             slot.querySelectorAll('[data-action]').forEach(button => {
                 button.addEventListener('click', event => {
                     event.preventDefault();
@@ -2986,6 +2990,7 @@
     function removeInput(role){
         const existing = state.inputs[role];
         if(state.operation === 'pose_transfer' && role === 'pose') activeWorkspace().poseDepth = null;
+        if(state.operation === 'pose_transfer' && role === 'source') window.PoseTransferCalibration?.removeSource?.();
         if(state.operation === 'try_on') state.tryOnPromptPreview = null;
         if(removeTryOnSelectedCandidate(role)) {
             // handled below by the shared render/persist path
@@ -3289,6 +3294,7 @@
             const uploadedInput = await uploadedInputFor(file, role, uploaded, existing);
             revokeReferencePreviewUrl(existing);
             state.inputs[role] = uploadedInput;
+            if(state.operation === 'pose_transfer' && role === 'source') window.PoseTransferCalibration?.reconcileSource?.(uploadedInput, true);
             if(state.operation === 'pose_transfer' && role === 'pose') {
                 currentOptions().pose_source = 'reference';
                 renderOperationControls();
@@ -3636,6 +3642,7 @@
             item.original_width = Number(item.original_width || selected.width || image.naturalWidth);
             item.original_height = Number(item.original_height || selected.height || image.naturalHeight);
             item.crop_history = history;
+            if(state.operation === 'pose_transfer' && preview.key === 'source') window.PoseTransferCalibration?.reconcileSource?.(item, true);
             if(state.operation === 'pose_transfer' && preview.key === 'pose') preparePoseDepthInBackground();
             syncTryOnCurrentCandidate(preview.key);
             renderInputs();
@@ -3661,6 +3668,7 @@
         item.name = selected.name || item.name;
         item.width = Number(selected.width || item.width || 0);
         item.height = Number(selected.height || item.height || 0);
+        if(state.operation === 'pose_transfer' && preview.key === 'source') window.PoseTransferCalibration?.reconcileSource?.(item, true);
         if(state.operation === 'pose_transfer' && preview.key === 'pose') preparePoseDepthInBackground();
         syncTryOnCurrentCandidate(preview.key);
         renderInputs();
@@ -4307,6 +4315,7 @@
         setZoom(state.zoom);
         requestAnimationFrame(syncCompareGeometry);
         renderCandidateRail();
+        window.PoseTransferCalibration?.syncResult?.(task);
         sessionStorage.setItem(CURRENT_TASK_KEY, taskIdOf(task));
         if(state.operation === 'try_on') syncTryOnGuidePanel();
     }

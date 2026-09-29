@@ -213,6 +213,11 @@ from canvas_core.ecommerce import (
     validate_mode as validate_ecommerce_mode,
     validate_operation as validate_ecommerce_operation,
 )
+from canvas_core.pose_calibration import (
+    create_pose_calibration_references,
+    normalize_pose_calibration,
+    pose_calibration_prompt,
+)
 from canvas_core.lookbook_brief import (
     STORY_VERSION as LOOKBOOK_STORY_VERSION, REFERENCE_LIMIT as LOOKBOOK_REFERENCE_LIMIT,
     STORY_SYSTEM as LOOKBOOK_STORY_SYSTEM, normalize_story as normalize_lookbook_story,
@@ -11808,7 +11813,7 @@ def gemini_reference_part(ref):
     role = str((ref or {}).get("role") or "").strip().lower()
     label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
     is_depth_map = role == "control_map" and "深度" in label
-    is_garment_reference = role in {"target_image", "fabric_detail", "garment", "upper_garment", "lower_garment", "full_garment", "detail", "subject", "model_subject", "model_identity"} or (ref or {}).get("reference_id") == "universal_pose_anchor"
+    is_garment_reference = role in {"target_image", "fabric_detail", "source_calibration", "garment", "upper_garment", "lower_garment", "full_garment", "detail", "subject", "model_subject", "model_identity"} or (ref or {}).get("reference_id") == "universal_pose_anchor"
     is_pose_transfer_source = (role == "source" and (ref or {}).get("garment_design_owner") is True) or role in {"source_view_1", "source_view_2"}
     pose_pair = role in {"pose_reference", "pose", "control_map"}
     value = reference_to_data_url(
@@ -11845,6 +11850,7 @@ GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "background": "只提供最终场景、背景结构、透视、环境色与环境光，不提供人物身份、动作或服装。",
     "source_view_1": "这是与主图同一款服装的第一个补充视角，只提供主图未展示的真实侧面或背面结构、拼缝走向、口袋位置和裤脚外扩。不能提供最终人物姿势、身份、构图或背景，不能把不可见的背面细节画到正面。",
     "source_view_2": "这是与主图同一款服装的第二个补充视角，只补足主图和上一视角仍未展示的真实结构。按最终机位显示对应物理侧面，不镜像、不复制重复拼缝；不改变主图确定的正面设计或动作图确定的姿势。",
+    "source_calibration": "这是从动作迁移保留款原图无损裁出的标定区域，只加强对应部位的版型轮廓、裁片关系、走线、纹理与颜色。它不提供人物姿势、构图或背景，也不能把局部结构复制到其他部位。",
 }
 
 
@@ -18671,6 +18677,13 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         )
         if operation == "pose_transfer" and any(item["role"] == "pose" for item in normalized):
             options["pose_source"] = "reference"
+        if operation == "pose_transfer":
+            source = next((item for item in normalized if item.get("role") == "source"), {})
+            calibration = normalize_pose_calibration(options.get("calibration"), str(source.get("url") or ""))
+            if calibration:
+                options["calibration"] = calibration
+            else:
+                options.pop("calibration", None)
         if str(options.get("prompt_policy") or "").lower() == "lookbook":
             if len(payload.inputs) > LOOKBOOK_REFERENCE_LIMIT:
                 raise ValueError(f"Lookbook 最多支持{LOOKBOOK_REFERENCE_LIMIT}张参考图，请减少输入后生成")
@@ -18758,6 +18771,8 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     reference_count = len(inputs)
+    if operation == "pose_transfer":
+        reference_count += len(((options.get("calibration") or {}).get("regions") or []))
     if operation == "universal" and not free_creation and options.get("generation_style") in {"standard_product", "lookbook"}:
         reference_count = len(universal_style_references(inputs, options["generation_style"], bool(options.get("instruction"))))
         if options["generation_style"] == "standard_product" and pose_reference:
@@ -20994,6 +21009,38 @@ async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[D
     return refs, prompt, {"status": "succeeded", "url": url, "source_url": pose["url"], "reference_index": index, "tier": tier}
 
 
+async def prepare_pose_calibration_evidence(
+    snapshot: Dict[str, Any],
+    references: List[Dict[str, Any]],
+    prompt: str,
+) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+    """把用户标定区域转换为真实生成引用，并保持整张原图仍是主权属。"""
+    if snapshot.get("operation") != "pose_transfer":
+        return references, prompt, {"status": "not_required", "regions": []}
+    calibration = (snapshot.get("options") or {}).get("calibration")
+    if not isinstance(calibration, dict) or not calibration.get("regions"):
+        return references, prompt, {"status": "not_required", "regions": []}
+    source = next((item for item in references if (item.get("role") or item.get("reference_type")) == "source"), None)
+    if not source or source.get("url") != calibration.get("source_url"):
+        raise ValueError("标定区域与当前保留款原图不匹配，请重新标定")
+    source_path = output_file_from_url(str(source.get("url") or ""))
+    if not source_path or not os.path.isfile(source_path):
+        raise ValueError("保留款原图不可读取，无法生成标定证据")
+    calibration_refs, audit = await asyncio.to_thread(
+        create_pose_calibration_references,
+        source_path,
+        calibration,
+        OUTPUT_OUTPUT_DIR,
+        lambda path: media_url_from_path(path),
+    )
+    if not calibration_refs:
+        return references, prompt, audit
+    source_index = references.index(source)
+    prepared = [*references[:source_index + 1], *calibration_refs, *references[source_index + 1:]]
+    prompt_addition = pose_calibration_prompt(calibration_refs, prepared)
+    return prepared, " ".join(part for part in (prompt, prompt_addition) if part), audit
+
+
 async def prepare_universal_product_anchor(snapshot, route, references, prompt):
     """先锁动作与环境，再换商品，隔离服装参考穿着者的姿势干扰。"""
     options = snapshot.get("options") or {}
@@ -21234,6 +21281,9 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
         if snapshot["operation"] in {"try_on", "pose_transfer"}:
             update_ecommerce_task(task_id, {"progress_status": "正在提取动作深度图…"})
         prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
+        prepared_refs, prepared_prompt, calibration_evidence = await prepare_pose_calibration_evidence(
+            snapshot, prepared_refs, prepared_prompt
+        )
         if snapshot["operation"] == "pose_transfer":
             pose_owns_background = not (snapshot.get("options") or {}).get("studio_reference") and not any(
                 (ref.get("role") or ref.get("reference_type")) == "background" for ref in prepared_refs
@@ -21248,6 +21298,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
         snapshot["pose_depth"] = pose_depth
         update_ecommerce_task(task_id, {"pose_depth": pose_depth, "generation_prompt": prepared_prompt,
                                        "generation_references": prepared_refs,
+                                       "calibration_evidence": calibration_evidence,
                                        "progress_status": "正在生成最终换衣图…" if snapshot["operation"] == "try_on" else ""})
         for index, route in enumerate(routes):
             try:
@@ -21401,6 +21452,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "generation_style": snapshot["options"].get("generation_style"),
                     "generation_prompt": generation_prompt,
                     "generation_references": generation_refs,
+                    "calibration_evidence": calibration_evidence,
                     "pose_depth": pose_depth,
                     "pose_anchor": pose_anchor,
                     "parent_task_id": snapshot.get("parent_task_id") or "",

@@ -26,6 +26,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.22.1">
     <link rel="stylesheet" href="/static/css/compare-viewer.css?v=2026.07.22.1">
     <link rel="stylesheet" href="/static/css/ecommerce.css?v=2026.09.28.pose-panel-footer.1">
+    <link rel="stylesheet" href="/static/css/ecommerce-pose-calibration.css?v=2026.09.29.1">
 </head>
 <body>
     <main id="ecommercePage" class="ec-page">
@@ -152,7 +153,10 @@
             <section class="ec-result-panel">
                 <div class="ec-section-head ec-result-head">
                     <div><span>OUTPUT</span><h2 data-i18n="ecommerce.resultPreview">结果预览</h2></div>
-                    <button id="compareReset" class="ec-text-button" type="button" data-i18n="ecommerce.resetCompare">对比复位</button>
+                    <div class="ec-result-head-actions">
+                        <button id="poseCalibrationReview" class="ec-text-button hidden" type="button">成品核对</button>
+                        <button id="compareReset" class="ec-text-button" type="button" data-i18n="ecommerce.resetCompare">对比复位</button>
+                    </div>
                 </div>
 
                 <div class="ec-result-body">
@@ -224,6 +228,68 @@
         <div id="taskList" class="ec-task-list"></div>
     </aside>
     <div id="drawerBackdrop" class="ec-backdrop hidden"></div>
+
+    <dialog id="poseCalibrationDialog" class="ec-dialog ec-pose-calibration-dialog">
+        <div class="ec-pose-calibration-shell">
+            <header class="ec-pose-calibration-head">
+                <div><small>POSE TRANSFER / CALIBRATION</small><h2>版型标定框</h2></div>
+                <div class="ec-pose-calibration-tabs" role="tablist" aria-label="版型标定视图">
+                    <button type="button" class="active" data-pose-calibration-tab="source" role="tab">原图标定</button>
+                    <button type="button" data-pose-calibration-tab="review" role="tab">成品核对</button>
+                </div>
+                <button id="poseCalibrationClose" class="ec-icon-button" type="button" aria-label="关闭">×</button>
+            </header>
+            <div class="ec-pose-calibration-body">
+                <section class="ec-pose-calibration-stage-shell">
+                    <div class="ec-pose-calibration-toolbar">
+                        <strong id="poseCalibrationStageTitle">保留款原图 · 重点区域</strong>
+                        <div>
+                            <button type="button" class="active" data-pose-calibration-mode="draw">＋ 框选</button>
+                            <button type="button" data-pose-calibration-mode="select">↖ 调整</button>
+                            <button type="button" data-pose-calibration-toggle>◉ 隐藏框</button>
+                        </div>
+                    </div>
+                    <div id="poseCalibrationStage" class="ec-pose-calibration-stage">
+                        <div id="poseCalibrationArt" class="ec-pose-calibration-art">
+                            <img id="poseCalibrationSourceImage" draggable="false" alt="保留款原图">
+                            <div id="poseCalibrationBoxes" class="ec-pose-calibration-boxes"></div>
+                        </div>
+                        <div id="poseCalibrationReviewStage" class="ec-pose-calibration-review hidden">
+                            <div class="ec-pose-calibration-review-head">
+                                <strong id="poseCalibrationReviewTitle">选择标定区域核对</strong>
+                                <span id="poseCalibrationReviewPixels">原始像素 100%</span>
+                            </div>
+                            <div class="ec-pose-calibration-review-viewport">
+                                <div id="poseCalibrationCompare" class="ec-pose-calibration-compare">
+                                    <div id="poseCalibrationBefore" class="ec-pose-calibration-native-crop" data-compare-before><img id="poseCalibrationBeforeImage" draggable="false" alt="原图标定区域"></div>
+                                    <div id="poseCalibrationAfterClip" class="ec-pose-calibration-after-clip" data-compare-after-clip><div id="poseCalibrationAfter" class="ec-pose-calibration-native-crop" data-compare-after><img id="poseCalibrationAfterImage" draggable="false" alt="成品对应区域"></div></div>
+                                    <button id="poseCalibrationHandle" class="ec-pose-calibration-handle" type="button" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="原图与成品局部划像对比"></button>
+                                    <span class="ec-pose-calibration-label before">原图</span><span class="ec-pose-calibration-label after">成品</span>
+                                </div>
+                                <div id="poseCalibrationReviewEmpty" class="ec-pose-calibration-review-empty hidden"></div>
+                            </div>
+                            <div class="ec-pose-calibration-review-foot">
+                                <span>原始像素 1:1 · 左键划像，中键拖移</span>
+                                <div><button type="button" id="poseCalibrationCustomResult">载入成品</button><button type="button" data-pose-review-step="-1">上一区</button><button type="button" id="poseCalibrationReviewReset">复位 100%</button><button type="button" data-pose-review-step="1">下一区</button></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ec-pose-calibration-status"><span id="poseCalibrationStatus">在原图上拖动绘制选区。</span><span id="poseCalibrationSize">—</span></div>
+                </section>
+                <aside class="ec-pose-calibration-inspector">
+                    <div class="ec-pose-calibration-inspector-head"><small>CALIBRATION</small><h3>重点保留区域 <span id="poseCalibrationCount">0</span></h3><p>框住需要重点维持的版型、走线和纹理；框外整套服装与人物仍由原图决定。</p></div>
+                    <div id="poseCalibrationList" class="ec-pose-calibration-list"></div>
+                    <div id="poseCalibrationAlignment" class="ec-pose-calibration-alignment hidden">
+                        <strong>成品对应区域对位</strong><p>动作变化会移动细节。调整成品裁取中心，不会修改生成图片。</p>
+                        <label>X <input id="poseCalibrationResultX" type="range" min="0" max="100" value="50"><output>50%</output></label>
+                        <label>Y <input id="poseCalibrationResultY" type="range" min="0" max="100" value="50"><output>50%</output></label>
+                    </div>
+                    <div class="ec-pose-calibration-inspector-foot"><div><button type="button" data-pose-calibration-add>＋ 新增标定</button><button type="button" data-pose-calibration-clear>清空</button></div><p>最多 4 个区域。生成时会同时提交整张原图与这些区域的带上下文无损裁片。</p></div>
+                </aside>
+            </div>
+        </div>
+        <input id="poseCalibrationResultFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    </dialog>
 
     <dialog id="assetDialog" class="ec-dialog ec-asset-dialog">
         <form method="dialog" class="ec-dialog-shell">
@@ -338,6 +404,7 @@
     <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
     <script src="/static/js/pose-replicate-settings.js?garment-material=20260911.4&v=2026.09.06.shared-prompts.1"></script>
     <script src="/static/js/ecommerce.js?v=2026.09.28.pose-background-owner.1&state=2026.09.20.1"></script>
+    <script src="/static/js/ecommerce-pose-calibration.js?v=2026.09.29.1"></script>
     <script src="/static/js/ecommerce-batch-outfit.js?v=2026.09.18.batch-pose-parity.1"></script>
 </body>
 </html>
